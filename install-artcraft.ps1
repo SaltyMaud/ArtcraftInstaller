@@ -202,13 +202,16 @@ function Show-Menu {
     Write-Host $title -ForegroundColor Cyan
     if ($script:apiNote) { Write-Host "  $($script:apiNote)" -ForegroundColor Yellow }
     Write-Host ''
-    $desc = WrapText $script:rows[$script:cursor].Desc 52
-    if ($desc.Count -gt $script:rows.Count) { $desc = @($desc[0..($script:rows.Count - 1)]) + '...' }
+    $paneWidth = 52
+    try { $w = [Console]::WindowWidth; if ($w -gt 0) { $paneWidth = [Math]::Max(20, $w - $script:listWidth - 4) } } catch { }
+    $desc = WrapText $script:rows[$script:cursor].Desc $paneWidth
+    $top = [Math]::Min($script:cursor, [Math]::Max(0, $script:rows.Count - $desc.Count))
     for ($i = 0; $i -lt $script:rows.Count; $i++) {
         $e = $script:rows[$i]
         $nameCol = (' [{0}] {1,-12} ' -f ((Row-Mark $e).Substring(1, 1)), $e.Name)
         $status = Row-Text $e
-        $pane = if ($i -lt $desc.Count) { ' | ' + $desc[$i] } else { '' }
+        $rel = $i - $top
+        $pane = if ($rel -ge 0 -and $rel -lt $desc.Count) { ' | ' + $desc[$rel] } else { '' }
         $isSel = $script:selected.ContainsKey((Row-Key $e))
         if ($i -eq $script:cursor) {
             $band = if ($isSel) { 'DarkGreen' } elseif ($e.State -eq 'diverged') { 'DarkYellow' }
@@ -225,7 +228,10 @@ function Show-Menu {
         }
     }
     Write-Host ''
-    Write-Host '  arrows move   Enter toggle   U select all updates   C confirm & run   D change drive   R refresh   Q quit' -ForegroundColor Cyan
+    $legend = '  arrows move   Enter toggle   U select all updates   C confirm & run'
+    if (-not $Update) { $legend += '   D change drive' }
+    $legend += '   R refresh   Q quit'
+    Write-Host $legend -ForegroundColor Cyan
     if ($script:note) { Write-Host "  $($script:note)" -ForegroundColor Yellow } else { Write-Host '' }
 }
 
@@ -453,7 +459,7 @@ if ($script:active -lt 0) {
 if ($script:active -lt 0) { $script:active = 0 }
 $err = Set-ActiveRoot $script:active
 if ($err) { Show-Cursor; Write-Host $err -ForegroundColor Red; exit 1 }
-if (@($script:roots | Where-Object { $_.Apps.Count -gt 0 }).Count -gt 1 -and -not [Console]::IsInputRedirected) {
+if (@($script:roots | Where-Object { $_.Apps.Count -gt 0 }).Count -gt 1 -and -not [Console]::IsInputRedirected -and -not $Update) {
     Pick-Root    # more than one drive has an ArtCraft installation - ask which one to work on
 }
 
@@ -490,7 +496,7 @@ while ($true) {
             $script:note = if ($n -gt 0) { "selected $n update(s)." } else { 'nothing to update.' }
         }
         C { if ($script:selected.Count -eq 0) { $script:note = 'nothing selected - toggle a row first.' } else { break loop } }
-        D { Pick-Root; $script:note = "now working on $((ActiveRoot).Path)." }
+        D { if ($Update) { $script:note = 'drive select applies to install mode.' } else { Pick-Root; $script:note = "now working on $((ActiveRoot).Path)." } }
         R { $script:roots = Get-Roots; $script:rows = Build-Rows; $script:note = 'refreshed.' }
         Q { Show-Cursor; Write-Host ''; Write-Host 'Quit - nothing changed.'; exit 0 }
     }
