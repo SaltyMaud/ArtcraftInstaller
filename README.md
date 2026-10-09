@@ -3,6 +3,10 @@
 Utility to install and update [ArtCraft](https://getartcraft.com) programs: EffectCraft,
 FilmCraft, PhotoCraft, VectorCraft and every other `*craft` app in the storytold family.
 
+> **Disclaimer:** This is an unofficial, community-made project. It is not affiliated with,
+> endorsed by, or sponsored by ArtCraft or storytold. All names and trademarks belong to
+> their respective owners.
+
 ## Get started
 
 Open **Command Prompt** or **PowerShell** (Start menu is fine - no admin needed) and paste:
