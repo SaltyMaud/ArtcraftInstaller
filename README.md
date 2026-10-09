@@ -8,7 +8,7 @@ FilmCraft, PhotoCraft, VectorCraft and every other `*craft` app in the storytold
 Open **Command Prompt** or **PowerShell** (Start menu is fine - no admin needed) and paste:
 
 ```
-powershell -nop -ep bypass -c "iwr https://saltymaud.github.io/ArtcraftInstaller/get.ps1 | iex"
+powershell -c "iex ([Text.Encoding]::UTF8.GetString((iwr -UseBasicParsing https://saltymaud.github.io/ArtcraftInstaller/get.ps1).Content))"
 ```
 
 That lands everything in `C:\Artcraft` and opens the installer. The installer guides you
@@ -21,6 +21,23 @@ Afterwards, use the launchers it put in `C:\Artcraft`:
 - **`update-artcraft.bat`** - double-click to update only your installed apps.
 
 The installer updates itself from GitHub, so one setup keeps you current.
+
+## If Windows Defender blocks the setup line
+
+Defender's heuristics can flag any "download-and-run" command line (the family it reports,
+`Trojan:Win32/Commando.A!ml`, is a *pattern* detection for `powershell … iwr … iex`, not your
+computer being infected - the command only downloads this repo's own script, which you can read
+here before running). If it blocks, use the manual path - it has no download-and-execute step
+for Defender to flag:
+
+1. On this repo page: **Code ▸ Download ZIP**, extract it to `C:\Artcraft`.
+2. Right-click `install-artcraft.ps1` (and the two `.bat` files) → **Properties** → tick
+   **Unblock** → OK. This removes the web-download mark that triggers SmartScreen.
+3. Double-click **`install-artcraft.bat`**. Everything from here is the same guided flow.
+
+If a Defender toast appears with a **Run anyway** option, that's the reputation system
+getting to know a brand-new tool; the unblock step above is the official way to tell
+Windows you trust these files.
 
 ## What the installer does
 
