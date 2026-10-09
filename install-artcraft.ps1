@@ -11,7 +11,7 @@ param([switch]$Update, [switch]$NoSelfUpdate)
 
 $script:failed = $false
 $script:selfUrl = 'https://raw.githubusercontent.com/SaltyMaud/ArtcraftInstaller/main/install-artcraft.ps1'
-$script:listWidth = 48   # columns used by the list; the description pane starts after it
+$script:listWidth = 50   # columns used by the list; the description pane starts after it
 $script:note = ''
 
 function FirstVersion([string[]]$lines) {
@@ -39,6 +39,24 @@ function Wait-AnyKey {
     [void][Console]::ReadKey($true)
 }
 function Exit-App([int]$code) { Wait-AnyKey; exit $code }
+function AppDisplay([string]$name) {
+    ((Get-Culture).TextInfo.ToTitleCase(($name -replace 'craft$',''))) + 'Craft'
+}
+function New-Shortcut([string]$lnk, [string]$target, [string]$work) {
+    $s = (New-Object -ComObject WScript.Shell).CreateShortcut($lnk)
+    $s.TargetPath = $target; $s.WorkingDirectory = $work
+    $s.IconLocation = "$target,0"
+    $s.Save()
+}
+function Make-Shortcuts([string]$dir, [string]$name) {
+    # start-menu + desktop .lnk for the built exe; skipped when the exe is absent
+    # (library-only crate, build failure). Overwriting is idempotent.
+    $exe = Join-Path $dir "target\release\$name.exe"
+    if (-not (Test-Path $exe)) { return }
+    $lnkName = (AppDisplay $name) + '.lnk'
+    New-Shortcut (Join-Path "$env:APPDATA\Microsoft\Windows\Start Menu\Programs" $lnkName) $exe $dir
+    New-Shortcut (Join-Path ([Environment]::GetFolderPath('Desktop')) $lnkName) $exe $dir
+}
 function RepoDesc($api, [string]$name) {
     if (-not $api) { return '' }
     return ((($api | Where-Object { $_.name -eq $name }).description) -replace '\s+', ' ').Trim()
@@ -130,6 +148,7 @@ function Get-Status([string]$dir) {
     $s.Sha = (git -C $dir rev-parse --short HEAD).Trim()
     $s.RemoteVer = FirstVersion (git -C $dir show origin/main:Cargo.toml)
     $s.State = if ($s.Ahead -gt 0) { 'diverged' } elseif ($s.Behind -gt 0) { 'behind' } else { 'uptodate' }
+    if ($s.State -eq 'uptodate' -and -not (Test-Path (Join-Path $dir "target\release\$(Split-Path $dir -Leaf).exe"))) { $s.State = 'nobinary' }
     return $s
 }
 
@@ -181,6 +200,7 @@ function Row-Text($e) {
         'behind'    { $v = if ($e.RemoteVer -ne $e.Ver) { "v$($e.Ver) -> v$($e.RemoteVer)" } else { "v$($e.Ver)" }; return "$tag" + "$($e.Behind) behind  $v" }
         'diverged'  { return "$tag" + "diverged - $($e.Ahead) local commit(s)" }
         'fetchfail' { return "$tag" + "git fetch failed  v$($e.Ver)" }
+        'nobinary'  { return "$tag" + "not built  v$($e.Ver) @ $($e.Sha)" }
         default     { $o = if ($e.Other) { " (also on $($e.Other))" } else { '' }; return "$tag" + "not installed$o" }
     }
 }
@@ -202,7 +222,7 @@ function Show-Menu {
     $paneWidth = 0
     try {
         $w = [Console]::WindowWidth
-        if ($w -gt 0) { if (($w - $script:listWidth - 4) -ge 20) { $paneWidth = $w - $script:listWidth - 4 } }
+        if ($w -gt 0) { if (($w - $script:listWidth - 6) -ge 20) { $paneWidth = $w - $script:listWidth - 6 } }
         else { $paneWidth = 52 }
     } catch { $paneWidth = 52 }
     $desc = if ($paneWidth -gt 0) { WrapText $script:rows[$script:cursor].Desc $paneWidth } else { @() }
@@ -212,7 +232,7 @@ function Show-Menu {
         $nameCol = (' [{0}] {1,-12} ' -f ((Row-Mark $e).Substring(1, 1)), $e.Name)
         $status = Row-Text $e
         $rel = $i - $top
-        $pane = if ($rel -ge 0 -and $rel -lt $desc.Count) { ' | ' + $desc[$rel] } else { '' }
+        $pane = if ($rel -ge 0 -and $rel -lt $desc.Count) { '  |  ' + $desc[$rel] } else { '' }
         $isSel = $script:selected.ContainsKey((Row-Key $e))
         if ($i -eq $script:cursor) {
             $band = if ($isSel) { 'DarkGreen' } elseif ($e.State -eq 'diverged') { 'DarkYellow' }
@@ -222,7 +242,7 @@ function Show-Menu {
         } else {
             $nameColor = if ($isSel) { 'Green' } elseif ($e.State -eq 'uptodate') { 'DarkGray' }
                          elseif ($e.State -eq 'diverged') { 'Yellow' } else { 'Gray' }
-            $statusColor = switch ($e.State) { 'behind' { 'Yellow' } 'fetchfail' { 'Red' } 'diverged' { 'Yellow' } 'uptodate' { 'DarkGray' } default { 'Gray' } }
+            $statusColor = switch ($e.State) { 'behind' { 'Yellow' } 'fetchfail' { 'Red' } 'nobinary' { 'Yellow' } 'diverged' { 'Yellow' } 'uptodate' { 'DarkGray' } default { 'Gray' } }
             Write-Host $nameCol -NoNewline -ForegroundColor $nameColor
             Write-Host ($status.PadRight($script:listWidth - $nameCol.Length)) -NoNewline -ForegroundColor $statusColor
             Write-Host $pane -ForegroundColor White
@@ -480,6 +500,11 @@ Hide-Cursor
 :loop
 while ($true) {
     Show-Menu
+    $w0 = [Console]::WindowWidth; $h0 = [Console]::WindowHeight
+    while (-not [Console]::KeyAvailable) {          # a window resize re-wraps stale lines on the spot -
+        if ([Console]::WindowWidth -ne $w0 -or [Console]::WindowHeight -ne $h0) { continue loop }   # repaint immediately instead of waiting for a key
+        Start-Sleep -Milliseconds 60
+    }
     $key = [Console]::ReadKey($true).Key
     $script:note = ''
     switch ($key) {
@@ -524,6 +549,7 @@ foreach ($e in $script:selected.Values) {
         Write-Host "$($tag)$name`: building..." -ForegroundColor Cyan
         cargo build --release -p $name --manifest-path (Join-Path $dir 'Cargo.toml')
         $ok = ($LASTEXITCODE -eq 0)
+        if ($ok) { Make-Shortcuts $dir $name }
         $results[$name] = if ($ok) { "$($tag)installed" } else { "$($tag)installed, BUILD FAILED"; $script:failed = $true }
     } else {
         $dir = $e.Dir
@@ -534,6 +560,7 @@ foreach ($e in $script:selected.Values) {
         Write-Host "$($tag)$name`: building..." -ForegroundColor Cyan
         cargo build --release -p $name --manifest-path (Join-Path $dir 'Cargo.toml')
         $ok = ($LASTEXITCODE -eq 0)
+        if ($ok) { Make-Shortcuts $dir $name }   # backfills shortcuts for pre-shortcut installs
         $newVer = FirstVersion (Get-Content (Join-Path $dir 'Cargo.toml') -ErrorAction SilentlyContinue)
         $verNote = if ($newVer -ne $e.Ver) { "v$($e.Ver) -> v$newVer" } else { "v$newVer" }
         $results[$name] = if ($ok) { "$($tag)updated $verNote" } else { "$($tag)pulled $verNote but BUILD FAILED"; $script:failed = $true }
