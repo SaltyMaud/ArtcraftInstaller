@@ -598,11 +598,9 @@ while ($true) {
             $need = @($script:selected.Values | Where-Object { Needs-DesktopShortcut $_ })
             $script:desktop = $false
             if ($need.Count -gt 0) {
+                $script:note = if ($need.Count -eq 1) { "Create a desktop shortcut for $(AppDisplay $need[0].Name)?   [Enter] yes   [Q/Esc] no" }
+                               else { "Create desktop shortcuts for $($need.Count) apps?   [Enter] yes   [Q/Esc] no" }
                 Show-Menu
-                Write-Host ''
-                $ask = if ($need.Count -eq 1) { "Create a desktop shortcut for $(AppDisplay $need[0].Name)?   [Enter] yes   [Q/Esc] no" }
-                       else { "Create desktop shortcuts for $($need.Count) apps?   [Enter] yes   [Q/Esc] no" }
-                Write-Host $ask -ForegroundColor Yellow
                 Show-Cursor
                 while ($true) {
                     $k = [Console]::ReadKey($true).Key
@@ -630,10 +628,9 @@ while ($true) {
                 $parts += $(if ($u.Forced) { "rebuild $($u.Name)$(& $tagOf $u)" } else { "update $($u.Name)$(& $tagOf $u)" })
             }
             $line = $parts -join ', '
+            $script:note = "$line."
             Show-Menu
-            Write-Host ''
-            Write-Host ($line.Substring(0, 1).ToUpper() + $line.Substring(1) + '.') -ForegroundColor Cyan
-            Write-Host 'Proceed?   [Enter] yes   [Q/Esc] back' -ForegroundColor Yellow
+            Write-Host '  Proceed?   [Enter] yes   [Q/Esc] back' -ForegroundColor Yellow
             Show-Cursor
             $go = $false
             while ($true) {
