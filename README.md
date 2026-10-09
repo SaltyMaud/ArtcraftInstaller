@@ -19,9 +19,9 @@ That one line runs a tiny bootstrap script: it downloads the installer and its l
 into your temp folder, and the installer handles the rest - including installing everything
 needed to build the apps (Rust, Git, MSVC C++ Build Tools) when they're missing. One stop,
 no prerequisites. **Nothing is created on your drives until you confirm an install.**
-The install target defaults to `C:\Artcraft`; press `D` in the installer to pick a different drive.
+The install target defaults to `C:\Artcraft_dev`; press `D` in the installer to pick a different drive.
 
-Afterwards, use the launchers the installer places in your `X:\ArtCraft` folder:
+Afterwards, use the launchers the installer places in your `X:\Artcraft_dev` folder:
 
 - **`install-artcraft.bat`** - double-click to install new apps or update any you have.
 - **`update-artcraft.bat`** - double-click to update only your installed apps.
@@ -36,15 +36,15 @@ The installer also keeps itself current from GitHub.
 - Force-rebuilds any up-to-date app from scratch when you want a guaranteed clean compile
 - Creates Start Menu shortcuts automatically and asks about desktop icons; copies on
   multiple drives get clearly distinguished shortcuts
-- Works across every drive: finds all `X:\ArtCraft` folders, installs where you choose and
+- Works across every drive: finds all `X:\Artcraft_dev` folders, installs where you choose and
   updates each copy where it lives
 - Preflight: installs Rust (rustup), Git (winget) and the MSVC C++ Build Tools when missing,
   checks drive write access, warns on low disk space
-- New `X:\ArtCraft` folders come with their own copy of the installer and launchers
+- New `X:\Artcraft_dev` folders come with their own copy of the installer and launchers
 
 ## Manual use
 
-Download `install-artcraft.ps1` + the two `.bat` files into any `X:\ArtCraft` folder,
+Download `install-artcraft.ps1` + the two `.bat` files into any `X:\Artcraft_dev` folder,
 or run it directly:
 
 ```

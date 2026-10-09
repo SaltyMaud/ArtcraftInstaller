@@ -1,5 +1,5 @@
 # install-artcraft.ps1 - ArtCraft installer/updater for the storytold xcraft apps.
-# Knows about every X:\ArtCraft folder on every drive, installs to the active one,
+# Knows about every X:\Artcraft_dev folder on every drive, installs to the active one,
 # and updates any installed copy in place on its own drive.
 #
 # Usage:  powershell -NoProfile -ExecutionPolicy Bypass -File install-artcraft.ps1 [-Update]
@@ -19,6 +19,11 @@ $script:desktop = $false   # set at confirm: user agreed to create missing deskt
 
 function FirstVersion([string[]]$lines) {
     foreach ($l in $lines) { if ($l -match '^\s*version\s*=\s*"([^"]+)"') { return $Matches[1] } }
+    return '?'
+}
+function Short-Commit([string]$dir) {
+    $sha = (git -C $dir rev-parse --short HEAD 2>$null | Select-Object -First 1)
+    if ($sha) { return $sha.Trim() }
     return '?'
 }
 function WrapText([string]$text, [int]$width) {
@@ -97,7 +102,7 @@ function Get-Roots {
             if (-not $d.IsReady) { continue }
             if ($d.DriveType -notin 'Fixed', 'Removable', 'Network') { continue }
             $letter = $d.Name.TrimEnd('\')                    # "C:"
-            $path = "$letter\ArtCraft"
+            $path = "$letter\Artcraft_dev"
             $apps = @()
             if (Test-Path $path) {
                 $apps = @(Get-ChildItem $path -Directory -ErrorAction SilentlyContinue |
@@ -148,7 +153,7 @@ function NormalizedHash([string]$path) {
     (($sha.ComputeHash($bytes)) | ForEach-Object { $_.ToString('x2') }) -join ''
 }
 function Seed-ArtcraftRoot([string]$path) {
-    # drop a copy of the installer + launchers at the root of a freshly created ArtCraft dir
+    # drop a copy of the installer + launchers at the root of a freshly created Artcraft_dev dir
     try {
         Copy-Item $PSCommandPath (Join-Path $path 'install-artcraft.ps1') -Force -ErrorAction Stop
         foreach ($b in 'install-artcraft.bat', 'update-artcraft.bat') {
@@ -305,7 +310,7 @@ function Show-Picker {
         $r = $script:roots[$i]
         $mark = if ($i -eq $script:active) { '[>]' } else { '[ ]' }
         $info = if ($r.Apps.Count -gt 0) { "$($r.Apps.Count) apps" } elseif (Test-Path $r.Path) { 'empty' } else { 'new' }
-        $text = (' {0} {1,-13} {2,-6} {3,5:N0} GB free' -f $mark, "$($r.Letter)\ArtCraft", $info, $r.FreeGB)
+        $text = (' {0} {1,-16} {2,-6} {3,5:N0} GB free' -f $mark, "$($r.Letter)\Artcraft_dev", $info, $r.FreeGB)
         if ($r.Label) { $text += "  $($r.Label)" }
         if ($i -eq $script:pick) {
             $band = if ($i -eq $script:active) { 'DarkGreen' } else { 'DarkCyan' }
@@ -528,7 +533,7 @@ if ($script:active -lt 0) {
     if ($withApps.Count -eq 1) { $script:active = [array]::IndexOf($script:roots, $withApps[0]) }
 }
 if ($script:active -lt 0) {
-    # script's own drive as the default ArtCraft location
+    # script's own drive as the default Artcraft_dev location
     $q = (Split-Path $PSScriptRoot -Qualifier).TrimEnd('\')
     $byLetter = $script:roots | Where-Object { $_.Letter -eq $q } | Select-Object -First 1
     $script:active = [array]::IndexOf($script:roots, $byLetter)
@@ -537,7 +542,7 @@ if ($script:active -lt 0) { $script:active = 0 }
 $err = Set-ActiveRoot $script:active
 if ($err) { Show-Cursor; Write-Host $err -ForegroundColor Red; Exit-App 1 }
 if (@($script:roots | Where-Object { $_.Apps.Count -gt 0 }).Count -gt 1 -and -not [Console]::IsInputRedirected -and -not $Update) {
-    Pick-Root    # more than one drive has an ArtCraft installation - ask which one to work on
+    Pick-Root    # more than one drive has an Artcraft_dev installation - ask which one to work on
 }
 
 # ---- main loop ------------------------------------------------------------------------------
@@ -698,7 +703,9 @@ foreach ($e in $script:selected.Values) {
             Resolve-Shortcut "$env:APPDATA\Microsoft\Windows\Start Menu\Programs" $dir $name $letter
             if ($script:desktop) { Resolve-Shortcut ([Environment]::GetFolderPath('Desktop')) $dir $name $letter }
         }
-        $results[$name] = if ($ok) { "$($tag)installed" } else { "$($tag)installed, BUILD FAILED"; $script:failed = $true }
+        $ver = FirstVersion (Get-Content (Join-Path $dir 'Cargo.toml') -ErrorAction SilentlyContinue)
+        $sha = Short-Commit $dir
+        $results[$name] = if ($ok) { "$($tag)installed v$ver @ $sha" } else { "$($tag)installed v$ver @ $sha, BUILD FAILED"; $script:failed = $true }
     } else {
         $dir = $e.Dir
         Write-Host ''
@@ -714,7 +721,8 @@ foreach ($e in $script:selected.Values) {
         $ok = ($LASTEXITCODE -eq 0)
         if ($ok) { Resolve-Shortcut "$env:APPDATA\Microsoft\Windows\Start Menu\Programs" $dir $name $letter }   # start menu self-heals per copy; desktop only on user consent
         $newVer = FirstVersion (Get-Content (Join-Path $dir 'Cargo.toml') -ErrorAction SilentlyContinue)
-        $verNote = if ($newVer -ne $e.Ver) { "v$($e.Ver) -> v$newVer" } else { "v$newVer" }
+        $sha = Short-Commit $dir
+        $verNote = if ($newVer -ne $e.Ver) { "v$($e.Ver) -> v$newVer @ $sha" } else { "v$newVer @ $sha" }
         $results[$name] = if ($ok) { "$($tag)updated $verNote" } else { "$($tag)pulled $verNote but BUILD FAILED"; $script:failed = $true }
     }
 }

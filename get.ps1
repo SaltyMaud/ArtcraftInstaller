@@ -5,7 +5,7 @@
 #
 # It stages the installer + launchers in your temp folder and starts the installer.
 # Nothing is created on your drives until you confirm an install - the real
-# X:\ArtCraft folder is made by the installer itself, on the drive you choose.
+# X:\Artcraft_dev folder is made by the installer itself, on the drive you choose.
 
 param([string]$Folder = (Join-Path $env:TEMP 'ArtcraftInstaller'))
 
