@@ -13,6 +13,7 @@ $script:failed = $false
 $script:selfUrl = 'https://raw.githubusercontent.com/SaltyMaud/ArtcraftInstaller/main/install-artcraft.ps1'
 $script:listWidth = 50   # columns used by the list; the description pane starts after it
 $script:note = ''
+$script:desktop = $false   # set at confirm: user agreed to create missing desktop shortcuts
 
 function FirstVersion([string[]]$lines) {
     foreach ($l in $lines) { if ($l -match '^\s*version\s*=\s*"([^"]+)"') { return $Matches[1] } }
@@ -48,14 +49,27 @@ function New-Shortcut([string]$lnk, [string]$target, [string]$work) {
     $s.IconLocation = "$target,0"
     $s.Save()
 }
-function Make-Shortcuts([string]$dir, [string]$name) {
-    # start-menu + desktop .lnk for the built exe; skipped when the exe is absent
+function Desktop-Lnk([string]$name) { Join-Path ([Environment]::GetFolderPath('Desktop')) ((AppDisplay $name) + '.lnk') }
+function Make-StartMenuShortcut([string]$dir, [string]$name) {
+    # start-menu .lnk for the built exe; skipped when the exe is absent
     # (library-only crate, build failure). Overwriting is idempotent.
     $exe = Join-Path $dir "target\release\$name.exe"
     if (-not (Test-Path $exe)) { return }
-    $lnkName = (AppDisplay $name) + '.lnk'
-    New-Shortcut (Join-Path "$env:APPDATA\Microsoft\Windows\Start Menu\Programs" $lnkName) $exe $dir
-    New-Shortcut (Join-Path ([Environment]::GetFolderPath('Desktop')) $lnkName) $exe $dir
+    New-Shortcut (Join-Path "$env:APPDATA\Microsoft\Windows\Start Menu\Programs" ((AppDisplay $name) + '.lnk')) $exe $dir
+}
+function Make-DesktopShortcut([string]$dir, [string]$name) {
+    # desktop .lnk; only made when the user said yes at the confirm prompt
+    $exe = Join-Path $dir "target\release\$name.exe"
+    if (-not (Test-Path $exe)) { return }
+    New-Shortcut (Desktop-Lnk $name) $exe $dir
+}
+function Needs-DesktopShortcut($e) {
+    # counts toward the desktop-shortcut prompt: 'new' rows get their exe after the build,
+    # installed rows count only when the exe exists (library-only crates can't be shortcut)
+    if (-not (Test-Path (Desktop-Lnk $e.Name))) {
+        return ($e.State -eq 'new' -or (Test-Path (Join-Path $e.Dir "target\release\$($e.Name).exe")))
+    }
+    return $false
 }
 function RepoDesc($api, [string]$name) {
     if (-not $api) { return '' }
@@ -535,7 +549,21 @@ while ($true) {
             foreach ($e in $script:rows) { if ($e.State -eq 'behind') { $script:selected[(Row-Key $e)] = $e; $n++ } }
             $script:note = if ($n -gt 0) { "selected $n update(s)." } else { 'nothing to update.' }
         }
-        C { if ($script:selected.Count -eq 0) { $script:note = 'nothing selected - toggle a row first.' } else { break loop } }
+        C {
+            if ($script:selected.Count -eq 0) { $script:note = 'nothing selected - toggle a row first.'; break }
+            $need = @($script:selected.Values | Where-Object { Needs-DesktopShortcut $_ })
+            $script:desktop = $false
+            if ($need.Count -gt 0) {
+                Show-Menu
+                Write-Host ''
+                Write-Host ("Create desktop shortcut(s) for {0} app(s) with none?  Y = yes, N = no" -f $need.Count) -ForegroundColor Yellow
+                Show-Cursor
+                do { $k = [Console]::ReadKey($true).Key } while ($k -notin 'Y', 'N')
+                $script:desktop = ($k -eq 'Y')
+                Hide-Cursor
+            }
+            break loop
+        }
         D { if ($Update) { $script:note = 'drive select applies to install mode.' } else { Pick-Root; $script:note = "now working on $((ActiveRoot).Path)." } }
         R { $script:roots = Get-Roots; $script:rows = Build-Rows; $script:note = 'refreshed.' }
         Q { Show-Cursor; Write-Host ''; Write-Host 'Quit - nothing changed.'; Exit-App 0 }
@@ -562,7 +590,10 @@ foreach ($e in $script:selected.Values) {
         Write-Host "$($tag)$name`: building..." -ForegroundColor Cyan
         cargo build --release -p $name --manifest-path (Join-Path $dir 'Cargo.toml')
         $ok = ($LASTEXITCODE -eq 0)
-        if ($ok) { Make-Shortcuts $dir $name }
+        if ($ok) {
+            Make-StartMenuShortcut $dir $name
+            if ($script:desktop) { Make-DesktopShortcut $dir $name }
+        }
         $results[$name] = if ($ok) { "$($tag)installed" } else { "$($tag)installed, BUILD FAILED"; $script:failed = $true }
     } else {
         $dir = $e.Dir
@@ -573,10 +604,19 @@ foreach ($e in $script:selected.Values) {
         Write-Host "$($tag)$name`: building..." -ForegroundColor Cyan
         cargo build --release -p $name --manifest-path (Join-Path $dir 'Cargo.toml')
         $ok = ($LASTEXITCODE -eq 0)
-        # no Make-Shortcuts here: updates must not recreate shortcuts the user deleted
+        if ($ok) { Make-StartMenuShortcut $dir $name }   # start menu self-heals (backfills pre-shortcut installs); desktop only on user consent
         $newVer = FirstVersion (Get-Content (Join-Path $dir 'Cargo.toml') -ErrorAction SilentlyContinue)
         $verNote = if ($newVer -ne $e.Ver) { "v$($e.Ver) -> v$newVer" } else { "v$newVer" }
         $results[$name] = if ($ok) { "$($tag)updated $verNote" } else { "$($tag)pulled $verNote but BUILD FAILED"; $script:failed = $true }
+    }
+}
+
+# desktop shortcuts the user approved at confirm; Make-DesktopShortcut skips rows whose
+# exe is absent (build failure, library-only crate)
+if ($script:desktop) {
+    foreach ($e in $script:selected.Values) {
+        if ($e.State -eq 'new') { continue }   # fresh installs already made theirs above
+        Make-DesktopShortcut $e.Dir $e.Name
     }
 }
 
