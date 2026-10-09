@@ -92,6 +92,15 @@ function Set-ActiveRoot([int]$i) {
     $script:active = $i
     return ''
 }
+function NormalizedHash([string]$path) {
+    # hash of file content with line endings normalized to LF and no BOM, so git
+    # autocrlf and CDN line-ending differences can never trigger a false update
+    $text = [IO.File]::ReadAllText($path)
+    $text = ($text -replace "`r`n", "`n") -replace "`r", "`n"
+    $bytes = (New-Object System.Text.UTF8Encoding($false)).GetBytes($text)
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    (($sha.ComputeHash($bytes)) | ForEach-Object { $_.ToString('x2') }) -join ''
+}
 function Seed-ArtcraftRoot([string]$path) {
     # drop a copy of the installer + launchers at the root of a freshly created ArtCraft dir
     try {
@@ -348,9 +357,7 @@ if ($PSCommandPath -and $PSScriptRoot -and -not $NoSelfUpdate) {
         Write-Host 'self-update check skipped (offline).' -ForegroundColor Yellow
     }
     if ($gotRemote) {
-        $hLocal = (Get-FileHash $selfPath -Algorithm SHA256).Hash
-        $hRemote = (Get-FileHash $remoteFile -Algorithm SHA256).Hash
-        if ($hRemote -ne $hLocal) {
+        if ((NormalizedHash $remoteFile) -ne (NormalizedHash $selfPath)) {
             if ([Console]::IsInputRedirected) {
                 Write-Host 'A newer install-artcraft.ps1 is on GitHub - rerun interactively to update.' -ForegroundColor Yellow
             } else {
@@ -370,7 +377,10 @@ if ($PSCommandPath -and $PSScriptRoot -and -not $NoSelfUpdate) {
                         Write-Host 'The GitHub copy failed its parse check - keeping this copy.' -ForegroundColor Red
                         $tokErr | ForEach-Object { Write-Host "  $($_.Message)" -ForegroundColor Red }
                     } else {
-                        Copy-Item $remoteFile $selfPath -Force
+                        # land the new copy with normalized LF endings and no BOM so the
+                        # next run hashes identical and never re-prompts
+                        $text = ([IO.File]::ReadAllText($remoteFile)) -replace "`r`n", "`n"
+                        [IO.File]::WriteAllText($selfPath, $text, (New-Object System.Text.UTF8Encoding($false)))
                         Show-Cursor
                         $extra = @(); if ($Update) { $extra = @('-Update') }
                         Start-Process powershell -ArgumentList (@('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $selfPath) + $extra)
