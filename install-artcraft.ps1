@@ -171,21 +171,26 @@ function Get-Status([string]$dir) {
 function Build-Rows {
     $rows = @()
     $api = $null
+    Write-Host 'Fetching app list from GitHub...' -ForegroundColor Cyan
     try {
         $api = Invoke-RestMethod -Uri 'https://api.github.com/orgs/storytold/repos?per_page=100' `
             -Headers @{ 'User-Agent' = 'artcraft-installer' } -TimeoutSec 20
     } catch { $api = $null }
     if ($Update) {
         # one row per installed copy across all roots, drive-tagged
-        foreach ($r in $script:roots) {
-            foreach ($name in $r.Apps) {
-                $dir = Join-Path $r.Path $name
-                $s = Get-Status $dir
-                $desc = RepoDesc $api $name
-                if (-not $desc) { $desc = '(no description on GitHub)' }
-                $rows += [pscustomobject]@{ Name = $name; Desc = $desc; Letter = $r.Letter; Dir = $dir
-                    State = $s.State; Ver = $s.Ver; RemoteVer = $s.RemoteVer; Sha = $s.Sha; Behind = $s.Behind; Ahead = $s.Ahead; Other = '' }
-            }
+        $copies = @()
+        foreach ($r in $script:roots) { foreach ($n in $r.Apps) { $copies += [pscustomobject]@{ R = $r; Name = $n } } }
+        $i = 0
+        foreach ($c in $copies) {
+            $i++
+            Write-Host "  checking $($c.Name) ($i/$($copies.Count))..." -ForegroundColor DarkGray
+            $r = $c.R; $name = $c.Name
+            $dir = Join-Path $r.Path $name
+            $s = Get-Status $dir
+            $desc = RepoDesc $api $name
+            if (-not $desc) { $desc = '(no description on GitHub)' }
+            $rows += [pscustomobject]@{ Name = $name; Desc = $desc; Letter = $r.Letter; Dir = $dir
+                State = $s.State; Ver = $s.Ver; RemoteVer = $s.RemoteVer; Sha = $s.Sha; Behind = $s.Behind; Ahead = $s.Ahead; Other = '' }
         }
         return , $rows
     }
@@ -195,7 +200,10 @@ function Build-Rows {
     foreach ($r in $script:roots) { $names += $r.Apps }
     $names = @($names | Sort-Object -Unique)
     $ar = ActiveRoot
+    $i = 0
     foreach ($name in $names) {
+        $i++
+        Write-Host "  checking $name ($i/$($names.Count))..." -ForegroundColor DarkGray
         $desc = RepoDesc $api $name
         if (-not $desc) { $desc = '(no description on GitHub)' }
         $dir = Join-Path $ar.Path $name
@@ -433,6 +441,7 @@ if ($PSCommandPath -and $PSScriptRoot -and -not $NoSelfUpdate) {
     $selfPath = $PSCommandPath
     $remoteFile = Join-Path $env:TEMP 'install-artcraft.remote.ps1'
     $gotRemote = $true
+    Write-Host 'Checking for installer update...' -ForegroundColor Cyan
     try {
         Invoke-WebRequest -Uri $script:selfUrl -OutFile $remoteFile -Headers @{ 'User-Agent' = 'artcraft-installer' } -TimeoutSec 10 -UseBasicParsing
     } catch {
