@@ -1,7 +1,7 @@
 # ArtcraftInstaller
 
 Windows utility to build and update [ArtCraft](https://github.com/storytold) programs from their GitHub repos: EffectCraft,
-FilmCraft, PhotoCraft, VectorCraft and every other `*craft` app in the Storytold ArtCraft family.
+FilmCraft, PhotoCraft, VectorCraft and every other `*craft` app in the Storytold ArtCraft family. This tool aims to make it slightly more convenient to keep dev builds updated, however regular users may want to just install precompiled release builds form the official repos.
 
 > **Disclaimer:** This is an unofficial, community-made project. It is not affiliated with,
 > endorsed by, or sponsored by ArtCraft or Storytold. All names and trademarks belong to
