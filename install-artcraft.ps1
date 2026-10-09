@@ -572,19 +572,19 @@ while ($true) {
                 $script:selected[(Row-Key $e)] = $e
                 $script:note = "$($e.Name) forced - clean rebuild."
             }
-            elseif ($script:selected.ContainsKey((Row-Key $e))) { $script:selected.Remove((Row-Key $e)) }
+            elseif ($script:selected.ContainsKey((Row-Key $e))) { $script:selected.Remove((Row-Key $e)); $script:note = "$($e.Name) deselected." }
             elseif ($e.State -eq 'uptodate') { $script:askForce = (Row-Key $e); $script:note = "$($e.Name) - Enter again to force clean rebuild." }
             elseif ($e.State -eq 'diverged' -or $e.State -eq 'fetchfail') { $script:note = "$($e.Name) has local changes/fetch trouble - left alone." }
-            else { $script:selected[(Row-Key $e)] = $e }
+            else { $script:selected[(Row-Key $e)] = $e; $script:note = "$($e.Name) selected." }
         }
         X {
             $e = $script:rows[$script:cursor]
             if ($e.State -eq 'new') { $script:note = "$($e.Name) is not installed here - nothing to remove." }
-            elseif ($script:remove.ContainsKey((Row-Key $e))) { $script:remove.Remove((Row-Key $e)) }
+            elseif ($script:remove.ContainsKey((Row-Key $e))) { $script:remove.Remove((Row-Key $e)); $script:note = "$($e.Name) no longer marked for removal." }
             else {
                 $script:remove[(Row-Key $e)] = $e
                 $script:selected.Remove((Row-Key $e))
-                $script:note = "$($e.Name) marked for removal - X clears the mark."
+                $script:note = "$($e.Name) marked for removal."
             }
         }
         U {
