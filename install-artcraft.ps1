@@ -5,7 +5,7 @@
 # Usage:  powershell -NoProfile -ExecutionPolicy Bypass -File install-artcraft.ps1 [-Update]
 #   arrows move, Enter toggles the highlighted row, X marks it for removal, U selects all updates,
 #   C confirms and runs install/update of the selected, D changes drive/location,
-#   R refreshes, Q quits.  -Update lists every installed copy across all drives.
+#   R refreshes, Q/Esc quits.  -Update lists every installed copy across all drives.
 
 param([switch]$Update, [switch]$NoSelfUpdate)
 
@@ -290,7 +290,7 @@ function Show-Menu {
     Write-Host ''
     $legend = '  arrows move   Enter toggle   X remove   U select all updates   C confirm & run'
     if (-not $Update) { $legend += '   D change drive' }
-    $legend += '   R refresh   Q quit'
+    $legend += '   R refresh   Q/Esc quit'
     Write-Host $legend -ForegroundColor Cyan
     if ($script:note) { Write-Host "  $($script:note)" -ForegroundColor Yellow } else { Write-Host '' }
 }
@@ -352,12 +352,12 @@ if (-not $cargo -and (Test-Path (Join-Path $env:USERPROFILE '.cargo\bin\cargo.ex
 if (-not $cargo) {
     if ([Console]::IsInputRedirected) { Write-Host 'Rust is required - install it from https://rustup.rs and rerun.' -ForegroundColor Red; Exit-App 1 }
     Hide-Cursor
-    Write-Host 'Rust is required to build the apps. Install it now?   [Enter] yes   [Esc] quit' -ForegroundColor Cyan
+    Write-Host 'Rust is required to build the apps. Install it now?   [Enter] yes   [Q/Esc] quit' -ForegroundColor Cyan
     $go = $false
     while ($true) {
         $k = [Console]::ReadKey($true).Key
         if ($k -eq 'Enter')  { $go = $true; break }
-        if ($k -eq 'Escape') { Show-Cursor; Write-Host 'Rust is required - quitting.'; Exit-App 1 }
+        if ($k -in 'Escape', 'Q') { Show-Cursor; Write-Host 'Rust is required - quitting.'; Exit-App 1 }
     }
     if ($go) {
         Show-Cursor
@@ -382,12 +382,12 @@ if (-not $git -and (Test-Path 'C:\Program Files\Git\cmd\git.exe')) {
 if (-not $git) {
     if ([Console]::IsInputRedirected) { Write-Host 'Git is required - install it from https://git-scm.com/downloads and rerun.' -ForegroundColor Red; Exit-App 1 }
     Hide-Cursor
-    Write-Host 'Git is required. Install it now?   [Enter] yes   [Esc] quit' -ForegroundColor Cyan
+    Write-Host 'Git is required. Install it now?   [Enter] yes   [Q/Esc] quit' -ForegroundColor Cyan
     $go = $false
     while ($true) {
         $k = [Console]::ReadKey($true).Key
         if ($k -eq 'Enter')  { $go = $true; break }
-        if ($k -eq 'Escape') { Show-Cursor; Write-Host 'Git is required - quitting.'; Exit-App 1 }
+        if ($k -in 'Escape', 'Q') { Show-Cursor; Write-Host 'Git is required - quitting.'; Exit-App 1 }
     }
     if ($go) {
         Show-Cursor
@@ -425,12 +425,12 @@ if (-not (Test-MSVC)) {
         Exit-App 1
     }
     Hide-Cursor
-    Write-Host 'MSVC Build Tools (C++) are required to link the apps. Install now?   [Enter] yes   [Esc] quit' -ForegroundColor Cyan
+    Write-Host 'MSVC Build Tools (C++) are required to link the apps. Install now?   [Enter] yes   [Q/Esc] quit' -ForegroundColor Cyan
     $go = $false
     while ($true) {
         $k = [Console]::ReadKey($true).Key
         if ($k -eq 'Enter')  { $go = $true; break }
-        if ($k -eq 'Escape') { Show-Cursor; Write-Host 'MSVC Build Tools are required - quitting.'; Exit-App 1 }
+        if ($k -in 'Escape', 'Q') { Show-Cursor; Write-Host 'MSVC Build Tools are required - quitting.'; Exit-App 1 }
     }
     if ($go) {
         Show-Cursor
@@ -482,12 +482,12 @@ if ($PSCommandPath -and $PSScriptRoot -and -not $NoSelfUpdate) {
                 Write-Host 'A newer install-artcraft.ps1 is on GitHub - rerun interactively to update.' -ForegroundColor Yellow
             } else {
                 Hide-Cursor
-                Write-Host 'A newer install-artcraft.ps1 is on GitHub. Update and restart?   [Enter] yes   [Esc] keep this copy' -ForegroundColor Cyan
+                Write-Host 'A newer install-artcraft.ps1 is on GitHub. Update and restart?   [Enter] yes   [Q/Esc] keep this copy' -ForegroundColor Cyan
                 $go = $false
                 while ($true) {
                     $k = [Console]::ReadKey($true).Key
                     if ($k -eq 'Enter')  { $go = $true; break }
-                    if ($k -eq 'Escape') { break }
+                    if ($k -in 'Escape', 'Q') { break }
                 }
                 if ($go) {
                     $tokErr = $null
@@ -645,6 +645,7 @@ while ($true) {
         D { if ($Update) { $script:note = 'drive select applies to install mode.' } else { Pick-Root; $script:note = "now working on $((ActiveRoot).Path)." } }
         R { $script:roots = Get-Roots; $script:rows = Build-Rows; $script:note = 'refreshed.' }
         Q { Show-Cursor; Write-Host ''; Write-Host 'Quit - nothing changed.'; Exit-App 0 }
+        Escape { Show-Cursor; Write-Host ''; Write-Host 'Quit - nothing changed.'; Exit-App 0 }
     }
 }
 Show-Cursor
