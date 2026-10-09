@@ -242,7 +242,7 @@ function Row-Text($e) {
 function Row-Mark($e) {
     if ($script:remove.ContainsKey((Row-Key $e))) { return '[X]' }
     if ($script:selected.ContainsKey((Row-Key $e))) { return '[>]' }
-    if ($e.State -eq 'uptodate') { return $(if ($script:askForce -eq (Row-Key $e)) { '[?]' } else { '[x]' }) }
+    if ($e.State -eq 'uptodate') { return $(if ($script:askForce -eq (Row-Key $e)) { '[?]' } else { '[-]' }) }
     if ($e.State -eq 'diverged') { return '[!]' }
     return '[ ]'
 }
