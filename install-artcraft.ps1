@@ -1,0 +1,432 @@
+# install-artcraft.ps1 - ArtCraft installer/updater for the storytold xcraft apps.
+# Knows about every X:\ArtCraft folder on every drive, installs to the active one,
+# and updates any installed copy in place on its own drive.
+#
+# Usage:  powershell -NoProfile -ExecutionPolicy Bypass -File install-artcraft.ps1 [-Update]
+#   arrows move, Enter toggles the highlighted row, U selects all updates,
+#   C confirms and runs install/update of the selected, D changes drive/location,
+#   R refreshes, Q quits.  -Update lists every installed copy across all drives.
+
+param([switch]$Update)
+
+$script:failed = $false
+$script:listWidth = 48   # columns used by the list; the description pane starts after it
+$script:known = @(
+    [pscustomobject]@{ Name = 'effectcraft'; Desc = 'Motion graphics and compositing (After Effects-style)' },
+    [pscustomobject]@{ Name = 'filmcraft';   Desc = 'Node-based video editor (Premiere-style)' },
+    [pscustomobject]@{ Name = 'photocraft';  Desc = 'Raster image editor (Photoshop-style), PSD-native' },
+    [pscustomobject]@{ Name = 'vectorcraft'; Desc = 'Vector design and illustration (Illustrator-style)' }
+)
+$script:apiNote = ''
+$script:note = ''
+
+function FirstVersion([string[]]$lines) {
+    foreach ($l in $lines) { if ($l -match '^\s*version\s*=\s*"([^"]+)"') { return $Matches[1] } }
+    return '?'
+}
+function WrapText([string]$text, [int]$width) {
+    $lines = @(); $cur = ''
+    foreach ($w in ($text -split '\s+')) {
+        if (-not $w) { continue }
+        if ($cur -eq '') { $cur = $w }
+        elseif (($cur.Length + 1 + $w.Length) -le $width) { $cur = "$cur $w" }
+        else { $lines += $cur; $cur = $w }
+    }
+    if ($cur) { $lines += $cur }
+    return $lines
+}
+function Hide-Cursor { try { [Console]::CursorVisible = $false } catch { } }
+function Show-Cursor { try { [Console]::CursorVisible = $true } catch { } }
+function KnownDesc([string]$name) {
+    $k = $script:known | Where-Object { $_.Name -eq $name } | Select-Object -First 1
+    if ($k) { return $k.Desc } return ''
+}
+
+# ---- drives and roots -------------------------------------------------------------------
+function Get-Roots {
+    $list = @()
+    foreach ($d in [System.IO.DriveInfo]::GetDrives()) {
+        try {
+            if (-not $d.IsReady) { continue }
+            if ($d.DriveType -notin 'Fixed', 'Removable', 'Network') { continue }
+            $letter = $d.Name.TrimEnd('\')                    # "C:"
+            $path = "$letter\ArtCraft"
+            $apps = @()
+            if (Test-Path $path) {
+                $apps = @(Get-ChildItem $path -Directory -ErrorAction SilentlyContinue |
+                    Where-Object { $_.Name -match '^[A-Za-z]+craft$' -and (Test-Path (Join-Path $_.FullName '.git')) } |
+                    ForEach-Object { $_.Name })
+            }
+            $list += [pscustomobject]@{
+                Path = $path; Letter = $letter; Label = $d.VolumeLabel
+                FreeGB = [Math]::Round($d.AvailableFreeSpace / 1GB, 1)
+                TotalGB = [Math]::Round($d.TotalSize / 1GB, 0)
+                Apps = $apps
+            }
+        } catch { }
+    }
+    return , $list
+}
+function Find-Root([string]$dir) { $script:roots | Where-Object { $_.Path -eq $dir } | Select-Object -First 1 }
+
+function Set-ActiveRoot([int]$i) {
+    $r = $script:roots[$i]
+    try {
+        if (Test-Path $r.Path) {
+            $probe = Join-Path $r.Path '.write-test'
+            Set-Content -Path $probe -Value 'x' -ErrorAction Stop
+            Remove-Item $probe -ErrorAction Stop
+        } else {
+            # folder does not exist: transiently create + remove it to test writability,
+            # so nothing is left behind - the real folder is made on a confirmed install
+            New-Item -ItemType Directory -Path $r.Path -ErrorAction Stop | Out-Null
+            $probe = Join-Path $r.Path '.write-test'
+            Set-Content -Path $probe -Value 'x' -ErrorAction Stop
+            Remove-Item $probe -ErrorAction Stop
+            Remove-Item $r.Path -Force -ErrorAction Stop
+        }
+    } catch {
+        return "no write access to $($r.Path) - pick another drive."
+    }
+    $script:active = $i
+    return ''
+}
+function ActiveRoot { $script:roots[$script:active] }
+function Disk-Note($r) {
+    if ($r.FreeGB -lt 5) { return "low disk space: $($r.FreeGB) GB free on $($r.Letter) - builds may fail." }
+    return ''
+}
+
+# ---- per-installation status -------------------------------------------------------------
+function Get-Status([string]$dir) {
+    $s = [pscustomobject]@{ State = 'new'; Ver = ''; RemoteVer = ''; Sha = ''; Behind = 0; Ahead = 0 }
+    if (-not (Test-Path (Join-Path $dir '.git'))) { return $s }
+    $s.Ver = FirstVersion (Get-Content (Join-Path $dir 'Cargo.toml') -ErrorAction SilentlyContinue)
+    git -C $dir fetch origin 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) { $s.State = 'fetchfail'; return $s }
+    $s.Behind = [int](git -C $dir rev-list --count 'HEAD..origin/main')
+    $s.Ahead  = [int](git -C $dir rev-list --count 'origin/main..HEAD')
+    $s.Sha = (git -C $dir rev-parse --short HEAD).Trim()
+    $s.RemoteVer = FirstVersion (git -C $dir show origin/main:Cargo.toml)
+    $s.State = if ($s.Ahead -gt 0) { 'diverged' } elseif ($s.Behind -gt 0) { 'behind' } else { 'uptodate' }
+    return $s
+}
+
+# ---- row building ------------------------------------------------------------------------
+function Build-Rows {
+    $rows = @()
+    if ($Update) {
+        # one row per installed copy across all roots, drive-tagged
+        foreach ($r in $script:roots) {
+            foreach ($name in $r.Apps) {
+                $dir = Join-Path $r.Path $name
+                $s = Get-Status $dir
+                $rows += [pscustomobject]@{ Name = $name; Desc = (KnownDesc $name); Letter = $r.Letter; Dir = $dir
+                    State = $s.State; Ver = $s.Ver; RemoteVer = $s.RemoteVer; Sha = $s.Sha; Behind = $s.Behind; Ahead = $s.Ahead; Other = '' }
+            }
+        }
+        return , $rows
+    }
+    # install mode: one row per app, status measured on the active root
+    $api = $null
+    $apps = @()
+    try {
+        $api = Invoke-RestMethod -Uri 'https://api.github.com/orgs/storytold/repos?per_page=100' `
+            -Headers @{ 'User-Agent' = 'artcraft-installer' } -TimeoutSec 20
+        $apps = @($api | Sort-Object name | Where-Object { $_.name -match '^[A-Za-z]+craft$' })
+    } catch {
+        $script:apiNote = 'GitHub API unreachable - showing known apps.'
+    }
+    $names = @($apps | ForEach-Object { $_.name })
+    if ($names.Count -eq 0) { $names = @($script:known | ForEach-Object { $_.Name }) }
+    foreach ($r in $script:roots) { $names += $r.Apps }
+    $names = @($names | Sort-Object -Unique)
+    $ar = ActiveRoot
+    foreach ($name in $names) {
+        $desc = if ($api) { ((($api | Where-Object { $_.name -eq $name }).description) -replace '\s+', ' ').Trim() } else { '' }
+        if (-not $desc) { $desc = KnownDesc $name }
+        if (-not $desc) { $desc = '(no description on GitHub)' }
+        $dir = Join-Path $ar.Path $name
+        $s = Get-Status $dir
+        $other = @($script:roots | Where-Object { $_.Letter -ne $ar.Letter -and $_.Apps -contains $name } | ForEach-Object { $_.Letter.TrimEnd(':') }) -join ','
+        $rows += [pscustomobject]@{ Name = $name; Desc = $desc; Letter = $ar.Letter; Dir = $dir
+            State = $s.State; Ver = $s.Ver; RemoteVer = $s.RemoteVer; Sha = $s.Sha; Behind = $s.Behind; Ahead = $s.Ahead; Other = $other }
+    }
+    return , $rows
+}
+
+function Row-Key($e) { "$($e.Letter)|$($e.Name)|$(if ($Update) { $e.Dir } else { 'new' })" }
+function Row-Text($e) {
+    $tag = if ($Update) { "$($e.Letter.TrimEnd(':')): " } else { '' }
+    switch ($e.State) {
+        'uptodate'  { return "$tag" + "up to date  v$($e.Ver) @ $($e.Sha)" }
+        'behind'    { $v = if ($e.RemoteVer -ne $e.Ver) { "v$($e.Ver) -> v$($e.RemoteVer)" } else { "v$($e.Ver)" }; return "$tag" + "$($e.Behind) behind  $v" }
+        'diverged'  { return "$tag" + "diverged - $($e.Ahead) local commit(s)" }
+        'fetchfail' { return "$tag" + "git fetch failed  v$($e.Ver)" }
+        default     { $o = if ($e.Other) { " (also on $($e.Other))" } else { '' }; return "$tag" + "not installed$o" }
+    }
+}
+function Row-Mark($e) {
+    if ($script:selected.ContainsKey((Row-Key $e))) { return '[>]' }
+    if ($e.State -eq 'uptodate') { return '[x]' }
+    if ($e.State -eq 'diverged') { return '[!]' }
+    return '[ ]'
+}
+
+# ---- menu rendering ------------------------------------------------------------------------
+$script:cursor = 0
+function Show-Menu {
+    Clear-Host
+    $ar = ActiveRoot
+    $title = if ($Update) { 'ArtCraft updater' } else { "ArtCraft installer  -  $($ar.Path)" }
+    Write-Host $title -ForegroundColor Cyan
+    if ($script:apiNote) { Write-Host "  $($script:apiNote)" -ForegroundColor Yellow }
+    Write-Host ''
+    $desc = WrapText $script:rows[$script:cursor].Desc 52
+    if ($desc.Count -gt $script:rows.Count) { $desc = @($desc[0..($script:rows.Count - 1)]) + '...' }
+    for ($i = 0; $i -lt $script:rows.Count; $i++) {
+        $e = $script:rows[$i]
+        $nameCol = (' [{0}] {1,-12} ' -f ((Row-Mark $e).Substring(1, 1)), $e.Name)
+        $status = Row-Text $e
+        $pane = if ($i -lt $desc.Count) { ' | ' + $desc[$i] } else { '' }
+        $isSel = $script:selected.ContainsKey((Row-Key $e))
+        if ($i -eq $script:cursor) {
+            $band = if ($isSel) { 'DarkGreen' } elseif ($e.State -eq 'diverged') { 'DarkYellow' }
+                    elseif ($e.State -eq 'uptodate') { 'DarkGray' } else { 'DarkCyan' }
+            Write-Host ($nameCol + $status).PadRight($script:listWidth) -NoNewline -ForegroundColor Black -BackgroundColor $band
+            Write-Host $pane -ForegroundColor White
+        } else {
+            $nameColor = if ($isSel) { 'Green' } elseif ($e.State -eq 'uptodate') { 'DarkGray' }
+                         elseif ($e.State -eq 'diverged') { 'Yellow' } else { 'Gray' }
+            $statusColor = switch ($e.State) { 'behind' { 'Yellow' } 'fetchfail' { 'Red' } 'diverged' { 'Yellow' } 'uptodate' { 'DarkGray' } default { 'Gray' } }
+            Write-Host $nameCol -NoNewline -ForegroundColor $nameColor
+            Write-Host ($status.PadRight($script:listWidth - $nameCol.Length)) -NoNewline -ForegroundColor $statusColor
+            Write-Host $pane -ForegroundColor White
+        }
+    }
+    Write-Host ''
+    Write-Host '  arrows move   Enter toggle   U select all updates   C confirm & run   D change drive   R refresh   Q quit' -ForegroundColor Cyan
+    if ($script:note) { Write-Host "  $($script:note)" -ForegroundColor Yellow } else { Write-Host '' }
+}
+
+# ---- drive picker ---------------------------------------------------------------------------
+function Show-Picker {
+    Clear-Host
+    Write-Host 'ArtCraft - choose the drive' -ForegroundColor Cyan
+    Write-Host ''
+    for ($i = 0; $i -lt $script:roots.Count; $i++) {
+        $r = $script:roots[$i]
+        $mark = if ($i -eq $script:active) { '[>]' } else { '[ ]' }
+        $info = if ($r.Apps.Count -gt 0) { "$($r.Apps.Count) apps" } elseif (Test-Path $r.Path) { 'empty' } else { 'new' }
+        $text = (' {0} {1,-13} {2,-6} {3,5:N0} GB free' -f $mark, "$($r.Letter)\ArtCraft", $info, $r.FreeGB)
+        if ($r.Label) { $text += "  $($r.Label)" }
+        if ($i -eq $script:pick) {
+            $band = if ($i -eq $script:active) { 'DarkGreen' } else { 'DarkCyan' }
+            Write-Host $text.PadRight($script:listWidth) -ForegroundColor Black -BackgroundColor $band
+        } else {
+            $color = if ($r.Apps.Count -gt 0) { 'Green' } else { 'Gray' }
+            Write-Host $text -ForegroundColor $color
+        }
+    }
+    Write-Host ''
+    Write-Host '  arrows move   Enter choose   Esc/Q back' -ForegroundColor Cyan
+    if ($script:note) { Write-Host "  $($script:note)" -ForegroundColor Yellow } else { Write-Host '' }
+}
+function Pick-Root() {
+    $script:pick = $script:active
+    Hide-Cursor
+    while ($true) {
+        Show-Picker
+        $key = [Console]::ReadKey($true).Key
+        $script:note = ''
+        switch ($key) {
+            UpArrow   { if ($script:pick -gt 0) { $script:pick-- } }
+            DownArrow { if ($script:pick -lt $script:roots.Count - 1) { $script:pick++ } }
+            Enter {
+                $err = Set-ActiveRoot $script:pick
+                if ($err) { $script:note = $err; continue }
+                $script:note = ''
+                $script:rows = Build-Rows
+                $script:note = Disk-Note (ActiveRoot)
+                $script:cursor = 0
+                return
+            }
+            Escape { return }
+            Q { return }
+        }
+    }
+}
+
+# ---- rust + git preflight (global, hard requirements) ---------------------------------------
+$cargo = Get-Command cargo -ErrorAction SilentlyContinue
+if (-not $cargo -and (Test-Path (Join-Path $env:USERPROFILE '.cargo\bin\cargo.exe'))) {
+    $env:Path = "$(Join-Path $env:USERPROFILE '.cargo\bin');$env:Path"
+    $cargo = Get-Command cargo -ErrorAction SilentlyContinue
+}
+if (-not $cargo) {
+    if ([Console]::IsInputRedirected) { Write-Host 'Rust is required - install it from https://rustup.rs and rerun.' -ForegroundColor Red; exit 1 }
+    Hide-Cursor
+    Write-Host 'Rust is required to build the apps. Install it now?   [Enter] yes   [Esc] quit' -ForegroundColor Cyan
+    $go = $false
+    while ($true) {
+        $k = [Console]::ReadKey($true).Key
+        if ($k -eq 'Enter')  { $go = $true; break }
+        if ($k -eq 'Escape') { Show-Cursor; Write-Host 'Rust is required - quitting.'; exit 1 }
+    }
+    if ($go) {
+        Show-Cursor
+        Write-Host 'Downloading rustup-init...' -ForegroundColor Cyan
+        $init = Join-Path $env:TEMP 'rustup-init.exe'
+        Invoke-WebRequest -Uri 'https://win.rustup.rs/x86_64' -OutFile $init -UseBasicParsing
+        & $init --default-toolchain stable -y
+        $env:Path = "$(Join-Path $env:USERPROFILE '.cargo\bin');$env:Path"
+        if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) {
+            Write-Host 'Rust install did not complete - quitting. Run https://win.rustup.rs/x86_64 yourself and rerun.' -ForegroundColor Red
+            exit 1
+        }
+    }
+    Hide-Cursor
+}
+
+$git = Get-Command git -ErrorAction SilentlyContinue
+if (-not $git -and (Test-Path 'C:\Program Files\Git\cmd\git.exe')) {
+    $env:Path = 'C:\Program Files\Git\cmd;' + $env:Path
+    $git = Get-Command git -ErrorAction SilentlyContinue
+}
+if (-not $git) {
+    if ([Console]::IsInputRedirected) { Write-Host 'Git is required - install it from https://git-scm.com/downloads and rerun.' -ForegroundColor Red; exit 1 }
+    Hide-Cursor
+    Write-Host 'Git is required. Install it now?   [Enter] yes   [Esc] quit' -ForegroundColor Cyan
+    $go = $false
+    while ($true) {
+        $k = [Console]::ReadKey($true).Key
+        if ($k -eq 'Enter')  { $go = $true; break }
+        if ($k -eq 'Escape') { Show-Cursor; Write-Host 'Git is required - quitting.'; exit 1 }
+    }
+    if ($go) {
+        Show-Cursor
+        if (Get-Command winget -ErrorAction SilentlyContinue) {
+            Write-Host 'Installing Git with winget (accept the elevation prompt)...' -ForegroundColor Cyan
+            winget install --id Git.Git -e --source winget --accept-package-agreements --accept-source-agreements
+        } else {
+            Write-Host 'Downloading the official Git installer...' -ForegroundColor Cyan
+            $rel = Invoke-RestMethod 'https://api.github.com/repos/git-for-windows/git/releases/latest' -Headers @{ 'User-Agent' = 'artcraft-installer' }
+            $url = ($rel.assets | Where-Object { $_.name -match '^Git-.*-64-bit\.exe$' } | Select-Object -First 1).browser_download_url
+            $setup = Join-Path $env:TEMP (Split-Path $url -Leaf)
+            Invoke-WebRequest -Uri $url -OutFile $setup -UseBasicParsing
+            Start-Process $setup -ArgumentList '/VERYSILENT', '/NORESTART', '/SP-' -Wait
+        }
+        if (Test-Path 'C:\Program Files\Git\cmd\git.exe') { $env:Path = 'C:\Program Files\Git\cmd;' + $env:Path }
+        if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+            Write-Host 'Git install did not complete - quitting. Install from https://git-scm.com/downloads and rerun.' -ForegroundColor Red
+            exit 1
+        }
+    }
+    Hide-Cursor
+}
+
+# ---- root selection --------------------------------------------------------------------------
+$script:roots = Get-Roots
+if ($script:roots.Count -eq 0) { Show-Cursor; Write-Host 'No usable drives found.' -ForegroundColor Red; exit 1 }
+$script:active = -1
+$home_ = Find-Root ([string]$PSScriptRoot)
+if ($home_) { $script:active = [array]::IndexOf($script:roots, $home_) }
+if ($script:active -lt 0) {
+    $withApps = @($script:roots | Where-Object { $_.Apps.Count -gt 0 })
+    if ($withApps.Count -eq 1) { $script:active = [array]::IndexOf($script:roots, $withApps[0]) }
+}
+if ($script:active -lt 0) {
+    # script's own drive as the default ArtCraft location
+    $q = (Split-Path $PSScriptRoot -Qualifier).TrimEnd('\')
+    $byLetter = $script:roots | Where-Object { $_.Letter -eq $q } | Select-Object -First 1
+    $script:active = [array]::IndexOf($script:roots, $byLetter)
+}
+if ($script:active -lt 0) { $script:active = 0 }
+$err = Set-ActiveRoot $script:active
+if ($err) { Show-Cursor; Write-Host $err -ForegroundColor Red; exit 1 }
+if (@($script:roots | Where-Object { $_.Apps.Count -gt 0 }).Count -gt 1 -and -not [Console]::IsInputRedirected) {
+    Pick-Root    # more than one drive has an ArtCraft installation - ask which one to work on
+}
+
+# ---- main loop ------------------------------------------------------------------------------
+$script:selected = @{}
+$script:rows = Build-Rows
+$script:note = Disk-Note (ActiveRoot)
+
+if ([Console]::IsInputRedirected) {
+    Show-Menu
+    Show-Cursor
+    Write-Host 'No interactive console available - nothing changed.' -ForegroundColor Yellow
+    exit 0
+}
+Hide-Cursor
+:loop
+while ($true) {
+    Show-Menu
+    $key = [Console]::ReadKey($true).Key
+    $script:note = ''
+    switch ($key) {
+        UpArrow   { if ($script:cursor -gt 0) { $script:cursor-- } }
+        DownArrow { if ($script:cursor -lt $script:rows.Count - 1) { $script:cursor++ } }
+        Enter {
+            $e = $script:rows[$script:cursor]
+            if ($e.State -eq 'uptodate') { $script:note = "$($e.Name) is up to date - nothing to do." }
+            elseif ($e.State -eq 'diverged' -or $e.State -eq 'fetchfail') { $script:note = "$($e.Name) has local changes/fetch trouble - left alone." }
+            elseif ($script:selected.ContainsKey((Row-Key $e))) { $script:selected.Remove((Row-Key $e)) }
+            else { $script:selected[(Row-Key $e)] = $e }
+        }
+        U {
+            $n = 0
+            foreach ($e in $script:rows) { if ($e.State -eq 'behind') { $script:selected[(Row-Key $e)] = $e; $n++ } }
+            $script:note = if ($n -gt 0) { "selected $n update(s)." } else { 'nothing to update.' }
+        }
+        C { if ($script:selected.Count -eq 0) { $script:note = 'nothing selected - toggle a row first.' } else { break loop } }
+        D { Pick-Root; $script:note = "now working on $((ActiveRoot).Path)." }
+        R { $script:roots = Get-Roots; $script:rows = Build-Rows; $script:note = 'refreshed.' }
+        Q { Show-Cursor; Write-Host ''; Write-Host 'Quit - nothing changed.'; exit 0 }
+    }
+}
+Show-Cursor
+
+# ---- run: clone new (to active root), pull + build updates (in place) ------------------------
+Clear-Host
+Write-Host 'Running...' -ForegroundColor Cyan
+$results = @{}
+foreach ($e in $script:selected.Values) {
+    $name = $e.Name
+    $tag = "$($e.Letter.TrimEnd(':')): "
+    if ($e.State -eq 'new') {
+        $ar = ActiveRoot
+        $dir = Join-Path $ar.Path $name
+        Write-Host ''
+        Write-Host "$($tag)$name`: cloning into $($ar.Path)..." -ForegroundColor Cyan
+        if (-not (Test-Path $ar.Path)) { New-Item -ItemType Directory -Path $ar.Path -ErrorAction SilentlyContinue | Out-Null }
+        if (-not (Test-Path $ar.Path)) { Write-Host "$($tag)$name`: install FAILED (could not create $($ar.Path))" -ForegroundColor Red; $results[$name] = "$($tag)install FAILED"; $script:failed = $true; continue }
+        git clone "https://github.com/storytold/$name" $dir
+        if ($LASTEXITCODE -ne 0) { Write-Host "$($tag)$name`: clone FAILED" -ForegroundColor Red; $results[$name] = "$($tag)clone FAILED"; $script:failed = $true; continue }
+        Write-Host "$($tag)$name`: building..." -ForegroundColor Cyan
+        cargo build --release -p $name --manifest-path (Join-Path $dir 'Cargo.toml')
+        $ok = ($LASTEXITCODE -eq 0)
+        $results[$name] = if ($ok) { "$($tag)installed" } else { "$($tag)installed, BUILD FAILED"; $script:failed = $true }
+    } else {
+        $dir = $e.Dir
+        Write-Host ''
+        Write-Host "$($tag)$name`: pulling..." -ForegroundColor Cyan
+        git -C $dir pull --ff-only
+        if ($LASTEXITCODE -ne 0) { Write-Host "$($tag)$name`: pull FAILED" -ForegroundColor Red; $results[$name] = "$($tag)pull FAILED"; $script:failed = $true; continue }
+        Write-Host "$($tag)$name`: building..." -ForegroundColor Cyan
+        cargo build --release -p $name --manifest-path (Join-Path $dir 'Cargo.toml')
+        $ok = ($LASTEXITCODE -eq 0)
+        $newVer = FirstVersion (Get-Content (Join-Path $dir 'Cargo.toml') -ErrorAction SilentlyContinue)
+        $verNote = if ($newVer -ne $e.Ver) { "v$($e.Ver) -> v$newVer" } else { "v$newVer" }
+        $results[$name] = if ($ok) { "$($tag)updated $verNote" } else { "$($tag)pulled $verNote but BUILD FAILED"; $script:failed = $true }
+    }
+}
+
+Write-Host ''
+Write-Host 'Summary' -ForegroundColor Cyan
+foreach ($name in ($results.Keys | Sort-Object)) {
+    Write-Host ('  {0}: {1}' -f $name, $results[$name]) -ForegroundColor $(if ($results[$name] -match 'FAILED') { 'Red' } else { 'Green' })
+}
+Write-Host ''
+if ($script:failed) { exit 1 } else { exit 0 }
