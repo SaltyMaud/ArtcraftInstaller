@@ -424,6 +424,19 @@ if ($PSCommandPath -and $PSScriptRoot -and -not $NoSelfUpdate) {
         Write-Host 'self-update check skipped (offline).' -ForegroundColor Yellow
     }
     if ($gotRemote) {
+        # refresh the launcher .bat files living next to this script - nothing else
+        # updates them, and the pre-fix copies end with echo + pause (double prompt)
+        $base = $script:selfUrl.Substring(0, $script:selfUrl.LastIndexOf('/') + 1)
+        foreach ($b in 'install-artcraft.bat', 'update-artcraft.bat') {
+            try {
+                $rb = Join-Path $env:TEMP "artcraft.$b.remote"
+                Invoke-WebRequest -Uri "$base$b" -OutFile $rb -Headers @{ 'User-Agent' = 'artcraft-installer' } -TimeoutSec 10 -UseBasicParsing
+                # CRLF endings, no BOM - cmd.exe wants it that way
+                $bt = ([IO.File]::ReadAllText($rb)) -replace "`r`n", "`n" -replace "`n", "`r`n"
+                [IO.File]::WriteAllText((Join-Path $PSScriptRoot $b), $bt, (New-Object System.Text.UTF8Encoding($false)))
+                Remove-Item $rb -ErrorAction SilentlyContinue
+            } catch { }
+        }
         if ((NormalizedHash $remoteFile) -ne (NormalizedHash $selfPath)) {
             if ([Console]::IsInputRedirected) {
                 Write-Host 'A newer install-artcraft.ps1 is on GitHub - rerun interactively to update.' -ForegroundColor Yellow
