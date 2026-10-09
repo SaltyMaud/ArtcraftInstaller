@@ -3,10 +3,11 @@
 # Paste this into CMD or PowerShell:
 #   powershell -c "iwr -UseBasicParsing https://saltymaud.github.io/ArtcraftInstaller/get.ps1 -OutFile $env:TEMP\get.ps1; & $env:TEMP\get.ps1"
 #
-# It lands the installer + launchers in the ArtCraft folder and starts the installer.
-# Everything after this is handled by install-artcraft.ps1 (self-updating from GitHub).
+# It stages the installer + launchers in your temp folder and starts the installer.
+# Nothing is created on your drives until you confirm an install - the real
+# X:\ArtCraft folder is made by the installer itself, on the drive you choose.
 
-param([string]$Folder = "$env:SystemDrive\Artcraft")
+param([string]$Folder = (Join-Path $env:TEMP 'ArtcraftInstaller'))
 
 $repo = 'https://raw.githubusercontent.com/SaltyMaud/ArtcraftInstaller/main'
 
@@ -23,5 +24,5 @@ try {
     exit 1
 }
 
-Write-Host "ArtCraft is set up in $Folder - launching the installer..." -ForegroundColor Green
+Write-Host "Staged in $Folder - launching the installer..." -ForegroundColor Green
 & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Folder 'install-artcraft.ps1')
