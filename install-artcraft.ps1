@@ -250,7 +250,8 @@ function Show-Menu {
         $pane = if ($rel -ge 0 -and $rel -lt $desc.Count) { '  |  ' + $desc[$rel] } else { '' }
         $isSel = $script:selected.ContainsKey((Row-Key $e))
         if ($i -eq $script:cursor) {
-            $band = if ($isSel) { 'DarkGreen' } elseif ($e.State -eq 'diverged') { 'DarkYellow' }
+            $band = if ($script:askForce -eq (Row-Key $e)) { 'Yellow' }   # force re-pull & rebuild prompt pending on this row
+                    elseif ($isSel) { 'DarkGreen' } elseif ($e.State -eq 'diverged') { 'DarkYellow' }
                     elseif ($e.State -eq 'uptodate') { 'DarkGray' } else { 'DarkCyan' }
             Write-Host ($nameCol + $status).PadRight($script:listWidth) -NoNewline -ForegroundColor Black -BackgroundColor $band
             Write-Host $pane -ForegroundColor White
