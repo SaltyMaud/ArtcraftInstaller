@@ -1,6 +1,6 @@
 # ArtcraftInstaller
 
-Windows utility to build and update [ArtCraft](https://getartcraft.com) programs from their GitHub repos: EffectCraft,
+Windows utility to build and update [ArtCraft](https://getartcraft.com/apps) programs from their GitHub repos: EffectCraft,
 FilmCraft, PhotoCraft, VectorCraft and every other `*craft` app in the Storytold ArtCraft family.
 
 > **Disclaimer:** This is an unofficial, community-made project. It is not affiliated with,
