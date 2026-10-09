@@ -9,7 +9,7 @@ FilmCraft, PhotoCraft, VectorCraft and every other `*craft` app in the storytold
 
 ## Get started
 
-Open **Command Prompt** or **PowerShell** (Start menu is fine - no admin needed) and paste:
+Open **Command Prompt** or **PowerShell** and paste:
 
 ```
 powershell -ep bypass -c "iwr -UseBasicParsing https://saltymaud.github.io/ArtcraftInstaller/get.ps1 -OutFile $env:TEMP\get.ps1; & $env:TEMP\get.ps1"
