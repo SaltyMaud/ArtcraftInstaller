@@ -719,20 +719,15 @@ foreach ($e in $script:selected.Values) {
         }
         cargo build --release -p $name --manifest-path (Join-Path $dir 'Cargo.toml')
         $ok = ($LASTEXITCODE -eq 0)
-        if ($ok) { Resolve-Shortcut "$env:APPDATA\Microsoft\Windows\Start Menu\Programs" $dir $name $letter }   # start menu self-heals per copy; desktop only on user consent
+        if ($ok) {   # shortcuts self-heal per copy, per app; desktop only on user consent
+            Resolve-Shortcut "$env:APPDATA\Microsoft\Windows\Start Menu\Programs" $dir $name $letter
+            if ($script:desktop) { Resolve-Shortcut ([Environment]::GetFolderPath('Desktop')) $dir $name $letter }
+        }
         $newVer = FirstVersion (Get-Content (Join-Path $dir 'Cargo.toml') -ErrorAction SilentlyContinue)
         $sha = Short-Commit $dir
         $verNote = if ($newVer -ne $e.Ver) { "v$($e.Ver) -> v$newVer @ $sha" } else { "v$newVer @ $sha" }
-        $results[$name] = if ($ok) { "$($tag)updated $verNote" } else { "$($tag)pulled $verNote but BUILD FAILED"; $script:failed = $true }
-    }
-}
-
-# desktop shortcuts the user approved at confirm; Resolve-Shortcut skips rows whose
-# exe is absent (build failure, library-only crate)
-if ($script:desktop) {
-    foreach ($e in $script:selected.Values) {
-        if ($e.State -eq 'new') { continue }   # fresh installs already made theirs above
-        Resolve-Shortcut ([Environment]::GetFolderPath('Desktop')) $e.Dir $e.Name $e.Letter.TrimEnd(':')
+        $action = if ($e.Forced) { 'rebuilt' } else { 'updated' }
+        $results[$name] = if ($ok) { "$($tag)$action $verNote" } else { "$($tag)pulled $verNote but BUILD FAILED"; $script:failed = $true }
     }
 }
 
