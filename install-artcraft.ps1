@@ -16,6 +16,7 @@ $script:note = ''
 $script:askForce = $null   # Row-Key of an uptodate row awaiting "Enter again" to force a clean rebuild
 $script:remove = @{}       # Row-Key => row, toggled by X: mark for removal, runs before installs/updates
 $script:desktop = $false   # set at confirm: user agreed to create missing desktop shortcuts
+$script:blacklist = @('artcraft')   # matches the naming convention but is not a series app; fully unsupported (-contains is case-insensitive)
 
 function FirstVersion([string[]]$lines) {
     foreach ($l in $lines) { if ($l -match '^\s*version\s*=\s*"([^"]+)"') { return $Matches[1] } }
@@ -106,7 +107,7 @@ function Get-Roots {
             $apps = @()
             if (Test-Path $path) {
                 $apps = @(Get-ChildItem $path -Directory -ErrorAction SilentlyContinue |
-                    Where-Object { $_.Name -match '^[A-Za-z]+craft$' -and (Test-Path (Join-Path $_.FullName '.git')) } |
+                    Where-Object { $_.Name -match '^[A-Za-z]+craft$' -and $script:blacklist -notcontains $_.Name -and (Test-Path (Join-Path $_.FullName '.git')) } |
                     ForEach-Object { $_.Name })
             }
             $list += [pscustomobject]@{
@@ -213,8 +214,8 @@ function Build-Rows {
     }
     # install mode: one row per app, status measured on the active root
     if (-not $api) { Show-Cursor; Write-Host 'GitHub API unreachable - cannot list apps.' -ForegroundColor Red; Exit-App 1 }
-    $names = @($api | Sort-Object name | Where-Object { $_.name -match '^[A-Za-z]+craft$' } | ForEach-Object { $_.name })
-    foreach ($r in $script:roots) { $names += $r.Apps }
+    $names = @($api | Sort-Object name | Where-Object { $_.name -match '^[A-Za-z]+craft$' -and $script:blacklist -notcontains $_.name } | ForEach-Object { $_.name })
+    foreach ($r in $script:roots) { $names += $r.Apps }   # Get-Roots already excludes the blacklist
     $names = @($names | Sort-Object -Unique)
     $ar = ActiveRoot
     $i = 0
