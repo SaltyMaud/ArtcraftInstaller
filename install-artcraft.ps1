@@ -556,7 +556,9 @@ while ($true) {
             if ($need.Count -gt 0) {
                 Show-Menu
                 Write-Host ''
-                Write-Host ("Create desktop shortcut(s) for {0} app(s) with none?   [Enter] yes   [Q/Esc] no" -f $need.Count) -ForegroundColor Yellow
+                $ask = if ($need.Count -eq 1) { "Create a desktop shortcut for $(AppDisplay $need[0].Name)?   [Enter] yes   [Q/Esc] no" }
+                       else { "Create desktop shortcuts for $($need.Count) apps?   [Enter] yes   [Q/Esc] no" }
+                Write-Host $ask -ForegroundColor Yellow
                 Show-Cursor
                 while ($true) {
                     $k = [Console]::ReadKey($true).Key
