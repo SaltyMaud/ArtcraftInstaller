@@ -3,7 +3,7 @@
 # and updates any installed copy in place on its own drive.
 #
 # Usage:  powershell -NoProfile -ExecutionPolicy Bypass -File install-artcraft.ps1 [-Update]
-#   arrows move, Enter toggles the highlighted row, U selects all updates,
+#   arrows move, Enter toggles the highlighted row, X marks it for removal, U selects all updates,
 #   C confirms and runs install/update of the selected, D changes drive/location,
 #   R refreshes, Q quits.  -Update lists every installed copy across all drives.
 
@@ -14,6 +14,7 @@ $script:selfUrl = 'https://raw.githubusercontent.com/SaltyMaud/ArtcraftInstaller
 $script:listWidth = 50   # columns used by the list; the description pane starts after it
 $script:note = ''
 $script:askForce = $null   # Row-Key of an uptodate row awaiting "Enter again" to force a clean rebuild
+$script:remove = @{}       # Row-Key => row, toggled by X: mark for removal, runs before installs/updates
 $script:desktop = $false   # set at confirm: user agreed to create missing desktop shortcuts
 
 function FirstVersion([string[]]$lines) {
@@ -239,6 +240,7 @@ function Row-Text($e) {
     }
 }
 function Row-Mark($e) {
+    if ($script:remove.ContainsKey((Row-Key $e))) { return '[X]' }
     if ($script:selected.ContainsKey((Row-Key $e))) { return '[>]' }
     if ($e.State -eq 'uptodate') { return $(if ($script:askForce -eq (Row-Key $e)) { '[?]' } else { '[x]' }) }
     if ($e.State -eq 'diverged') { return '[!]' }
@@ -268,14 +270,16 @@ function Show-Menu {
         $rel = $i - $top
         $pane = if ($rel -ge 0 -and $rel -lt $desc.Count) { '  |  ' + $desc[$rel] } else { '' }
         $isSel = $script:selected.ContainsKey((Row-Key $e))
+        $isRem = $script:remove.ContainsKey((Row-Key $e))
         if ($i -eq $script:cursor) {
-            $band = if ($script:askForce -eq (Row-Key $e)) { 'Yellow' }   # force clean-rebuild prompt pending on this row
+            $band = if ($isRem) { 'DarkRed' }   # marked for removal
+                    elseif ($script:askForce -eq (Row-Key $e)) { 'Yellow' }   # force clean-rebuild prompt pending on this row
                     elseif ($isSel) { 'DarkGreen' } elseif ($e.State -eq 'diverged') { 'DarkYellow' }
                     elseif ($e.State -eq 'uptodate') { 'DarkGray' } else { 'DarkCyan' }
             Write-Host ($nameCol + $status).PadRight($script:listWidth) -NoNewline -ForegroundColor Black -BackgroundColor $band
             Write-Host $pane -ForegroundColor White
         } else {
-            $nameColor = if ($isSel) { 'Green' } elseif ($e.State -eq 'uptodate') { 'DarkGray' }
+            $nameColor = if ($isRem) { 'DarkRed' } elseif ($isSel) { 'Green' } elseif ($e.State -eq 'uptodate') { 'DarkGray' }
                          elseif ($e.State -eq 'diverged') { 'Yellow' } else { 'Gray' }
             $statusColor = switch ($e.State) { 'behind' { 'Yellow' } 'fetchfail' { 'Red' } 'nobinary' { 'Yellow' } 'diverged' { 'Yellow' } 'uptodate' { 'DarkGray' } default { 'Gray' } }
             Write-Host $nameCol -NoNewline -ForegroundColor $nameColor
@@ -284,7 +288,7 @@ function Show-Menu {
         }
     }
     Write-Host ''
-    $legend = '  arrows move   Enter toggle   U select all updates   C confirm & run'
+    $legend = '  arrows move   Enter toggle   X remove   U select all updates   C confirm & run'
     if (-not $Update) { $legend += '   D change drive' }
     $legend += '   R refresh   Q quit'
     Write-Host $legend -ForegroundColor Cyan
@@ -562,7 +566,8 @@ while ($true) {
         DownArrow { if ($script:cursor -lt $script:rows.Count - 1) { $script:cursor++ } }
         Enter {
             $e = $script:rows[$script:cursor]
-            if ($asked -and $asked -eq (Row-Key $e)) {
+            if ($script:remove.ContainsKey((Row-Key $e))) { $script:remove.Remove((Row-Key $e)); $script:note = "$($e.Name) no longer marked for removal." }
+            elseif ($asked -and $asked -eq (Row-Key $e)) {
                 $e | Add-Member -Force Forced $true
                 $script:selected[(Row-Key $e)] = $e
                 $script:note = "$($e.Name) forced - clean rebuild."
@@ -572,13 +577,24 @@ while ($true) {
             elseif ($e.State -eq 'diverged' -or $e.State -eq 'fetchfail') { $script:note = "$($e.Name) has local changes/fetch trouble - left alone." }
             else { $script:selected[(Row-Key $e)] = $e }
         }
+        X {
+            $e = $script:rows[$script:cursor]
+            if ($e.State -eq 'new') { $script:note = "$($e.Name) is not installed here - nothing to remove." }
+            elseif ($script:remove.ContainsKey((Row-Key $e))) { $script:remove.Remove((Row-Key $e)) }
+            else {
+                $script:remove[(Row-Key $e)] = $e
+                $script:selected.Remove((Row-Key $e))
+                $script:note = "$($e.Name) marked for removal - X clears the mark."
+            }
+        }
         U {
             $n = 0
             foreach ($e in $script:rows) { if ($e.State -eq 'behind') { $script:selected[(Row-Key $e)] = $e; $n++ } }
             $script:note = if ($n -gt 0) { "selected $n update(s)." } else { 'nothing to update.' }
         }
         C {
-            if ($script:selected.Count -eq 0) { $script:note = 'nothing selected - toggle a row first.'; break }
+            if ($script:selected.Count -eq 0 -and $script:remove.Count -eq 0) { $script:note = 'nothing selected - toggle a row first.'; break }
+            # 1) desktop-shortcut consent for selected rows
             $need = @($script:selected.Values | Where-Object { Needs-DesktopShortcut $_ })
             $script:desktop = $false
             if ($need.Count -gt 0) {
@@ -595,6 +611,38 @@ while ($true) {
                 }
                 Hide-Cursor
             }
+            # 2) brief overview + go/no-go; names when a category has a single item
+            $rem = @($script:remove.Values); $new = @($script:selected.Values | Where-Object { $_.State -eq 'new' })
+            $upd = @($script:selected.Values | Where-Object { $_.State -ne 'new' })
+            $forced = @($upd | Where-Object { $_.Forced })
+            $tagOf = { param($e) if ($Update) { " ($($e.Letter.TrimEnd(':')))" } else { '' } }
+            $parts = @()
+            if ($rem.Count -ge 2) { $parts += "remove $($rem.Count) programs" }
+            elseif ($rem.Count -eq 1) { $parts += "remove $($rem[0].Name)$(& $tagOf $rem[0])" }
+            if ($new.Count -ge 2) { $parts += "install $($new.Count) programs" }
+            elseif ($new.Count -eq 1) { $parts += "install $($new[0].Name)" }
+            if ($upd.Count -ge 2) {
+                $fp = if ($forced.Count -gt 0) { " ($($forced.Count) clean rebuild$(if ($forced.Count -gt 1) { 's' }))" } else { '' }
+                $parts += "update $($upd.Count) programs$fp"
+            }
+            elseif ($upd.Count -eq 1) {
+                $u = $upd[0]
+                $parts += $(if ($u.Forced) { "rebuild $($u.Name)$(& $tagOf $u)" } else { "update $($u.Name)$(& $tagOf $u)" })
+            }
+            $line = $parts -join ', '
+            Show-Menu
+            Write-Host ''
+            Write-Host ($line.Substring(0, 1).ToUpper() + $line.Substring(1) + '.') -ForegroundColor Cyan
+            Write-Host 'Proceed?   [Enter] yes   [Q/Esc] back' -ForegroundColor Yellow
+            Show-Cursor
+            $go = $false
+            while ($true) {
+                $k = [Console]::ReadKey($true).Key
+                if ($k -eq 'Enter') { $go = $true; break }
+                if ($k -in 'Escape', 'Q') { $go = $false; break }
+            }
+            Hide-Cursor
+            if (-not $go) { $script:note = 'back - nothing run.'; continue loop }
             break loop
         }
         D { if ($Update) { $script:note = 'drive select applies to install mode.' } else { Pick-Root; $script:note = "now working on $((ActiveRoot).Path)." } }
@@ -604,10 +652,32 @@ while ($true) {
 }
 Show-Cursor
 
-# ---- run: clone new (to active root), pull + build updates (in place) ------------------------
+# ---- run: removals first, then clone new (to active root), pull + build updates (in place) ----
 Clear-Host
 Write-Host 'Running...' -ForegroundColor Cyan
 $results = @{}
+foreach ($e in $script:remove.Values) {
+    $name = $e.Name
+    $dir = $e.Dir
+    $tag = "$($e.Letter.TrimEnd(':')): "
+    Write-Host ''
+    Write-Host "$($tag)$name`: removing..." -ForegroundColor Cyan
+    # path safety: only ever delete a <known root>\<app> folder
+    if (-not @($script:roots | Where-Object { $dir -ieq (Join-Path $_.Path $name) }).Count) {
+        Write-Host "$($tag)$name`: removal FAILED (unexpected path)" -ForegroundColor Red; $results[$name] = "$($tag)removal FAILED"; $script:failed = $true; continue
+    }
+    Remove-Item -Recurse -Force $dir -ErrorAction SilentlyContinue
+    if (Test-Path $dir) {
+        Write-Host "$($tag)$name`: removal FAILED (files in use - close the app and retry)" -ForegroundColor Red; $results[$name] = "$($tag)removal FAILED"; $script:failed = $true; continue
+    }
+    # drop shortcuts aimed at the deleted copy (suffix-free or suffixed); other drives' copies untouched
+    foreach ($lnk in (Get-ChildItem ([Environment]::GetFolderPath('Desktop')), "$env:APPDATA\Microsoft\Windows\Start Menu\Programs" -Filter ((AppDisplay $name) + '*.lnk') -ErrorAction SilentlyContinue)) {
+        if ((Get-ShortcutTarget $lnk.FullName).StartsWith($dir, [System.StringComparison]::CurrentCultureIgnoreCase)) {
+            Remove-Item $lnk.FullName -Force -ErrorAction SilentlyContinue
+        }
+    }
+    $results[$name] = "$($tag)removed"
+}
 foreach ($e in $script:selected.Values) {
     $name = $e.Name
     $letter = $e.Letter.TrimEnd(':')
