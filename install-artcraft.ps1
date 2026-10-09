@@ -556,10 +556,13 @@ while ($true) {
             if ($need.Count -gt 0) {
                 Show-Menu
                 Write-Host ''
-                Write-Host ("Create desktop shortcut(s) for {0} app(s) with none?  Y = yes, N = no" -f $need.Count) -ForegroundColor Yellow
+                Write-Host ("Create desktop shortcut(s) for {0} app(s) with none?   [Enter] yes   [Q/Esc] no" -f $need.Count) -ForegroundColor Yellow
                 Show-Cursor
-                do { $k = [Console]::ReadKey($true).Key } while ($k -notin 'Y', 'N')
-                $script:desktop = ($k -eq 'Y')
+                while ($true) {
+                    $k = [Console]::ReadKey($true).Key
+                    if ($k -eq 'Enter') { $script:desktop = $true; break }
+                    if ($k -in 'Escape', 'Q') { $script:desktop = $false; break }
+                }
                 Hide-Cursor
             }
             break loop
