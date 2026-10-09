@@ -50,27 +50,38 @@ function New-Shortcut([string]$lnk, [string]$target, [string]$work) {
     $s.IconLocation = "$target,0"
     $s.Save()
 }
-function Desktop-Lnk([string]$name) { Join-Path ([Environment]::GetFolderPath('Desktop')) ((AppDisplay $name) + '.lnk') }
-function Make-StartMenuShortcut([string]$dir, [string]$name) {
-    # start-menu .lnk for the built exe; skipped when the exe is absent
+function Get-ShortcutTarget([string]$lnk) {
+    if (-not (Test-Path $lnk)) { return '' }
+    return (New-Object -ComObject WScript.Shell).CreateShortcut($lnk).TargetPath
+}
+function Resolve-Shortcut([string]$lnkDir, [string]$dir, [string]$name, [string]$letter) {
+    # ensure $lnkDir holds a .lnk aimed at this copy's exe; the suffix-free name is the app's
+    # first shortcut, later drives get "Name (X).lnk". Never steals a suffix-free shortcut
+    # aimed at another drive's copy; never duplicates. Skipped when the exe is absent
     # (library-only crate, build failure). Overwriting is idempotent.
     $exe = Join-Path $dir "target\release\$name.exe"
     if (-not (Test-Path $exe)) { return }
-    New-Shortcut (Join-Path "$env:APPDATA\Microsoft\Windows\Start Menu\Programs" ((AppDisplay $name) + '.lnk')) $exe $dir
-}
-function Make-DesktopShortcut([string]$dir, [string]$name) {
-    # desktop .lnk; only made when the user said yes at the confirm prompt
-    $exe = Join-Path $dir "target\release\$name.exe"
-    if (-not (Test-Path $exe)) { return }
-    New-Shortcut (Desktop-Lnk $name) $exe $dir
+    $base = AppDisplay $name
+    $flat = Join-Path $lnkDir "$base.lnk"
+    $suff = Join-Path $lnkDir "$base ($letter).lnk"
+    $t = Get-ShortcutTarget $flat
+    if ($t -ieq $exe) { New-Shortcut $flat $exe $dir; return }       # suffix-free already ours - refresh
+    if (Test-Path $suff) { New-Shortcut $suff $exe $dir; return }    # this drive's suffixed shortcut - refresh
+    if (-not $t) { New-Shortcut $flat $exe $dir; return }            # no suffix-free anywhere - first shortcut, no suffix
+    New-Shortcut $suff $exe $dir                                      # suffix-free serves another drive - add suffixed
 }
 function Needs-DesktopShortcut($e) {
     # counts toward the desktop-shortcut prompt: 'new' rows get their exe after the build,
-    # installed rows count only when the exe exists (library-only crates can't be shortcut)
-    if (-not (Test-Path (Desktop-Lnk $e.Name))) {
-        return ($e.State -eq 'new' -or (Test-Path (Join-Path $e.Dir "target\release\$($e.Name).exe")))
+    # installed rows count only when the exe exists (library-only crates can't be shortcut);
+    # a row is satisfied when a desktop .lnk, suffix-free or drive-suffixed, aims at this copy
+    $exe = Join-Path $e.Dir "target\release\$($e.Name).exe"
+    if ($e.State -ne 'new' -and -not (Test-Path $exe)) { return $false }
+    $base = AppDisplay $e.Name
+    $desk = [Environment]::GetFolderPath('Desktop')
+    foreach ($lnk in (Join-Path $desk "$base.lnk"), (Join-Path $desk "$base ($($e.Letter.TrimEnd(':'))).lnk")) {
+        if ((Get-ShortcutTarget $lnk) -ieq $exe) { return $false }
     }
-    return $false
+    return $true
 }
 function RepoDesc($api, [string]$name) {
     if (-not $api) { return '' }
@@ -599,7 +610,8 @@ Write-Host 'Running...' -ForegroundColor Cyan
 $results = @{}
 foreach ($e in $script:selected.Values) {
     $name = $e.Name
-    $tag = "$($e.Letter.TrimEnd(':')): "
+    $letter = $e.Letter.TrimEnd(':')
+    $tag = "$letter`: "
     if ($e.State -eq 'new') {
         $ar = ActiveRoot
         $dir = Join-Path $ar.Path $name
@@ -613,8 +625,8 @@ foreach ($e in $script:selected.Values) {
         cargo build --release -p $name --manifest-path (Join-Path $dir 'Cargo.toml')
         $ok = ($LASTEXITCODE -eq 0)
         if ($ok) {
-            Make-StartMenuShortcut $dir $name
-            if ($script:desktop) { Make-DesktopShortcut $dir $name }
+            Resolve-Shortcut "$env:APPDATA\Microsoft\Windows\Start Menu\Programs" $dir $name $letter
+            if ($script:desktop) { Resolve-Shortcut ([Environment]::GetFolderPath('Desktop')) $dir $name $letter }
         }
         $results[$name] = if ($ok) { "$($tag)installed" } else { "$($tag)installed, BUILD FAILED"; $script:failed = $true }
     } else {
@@ -630,19 +642,19 @@ foreach ($e in $script:selected.Values) {
         }
         cargo build --release -p $name --manifest-path (Join-Path $dir 'Cargo.toml')
         $ok = ($LASTEXITCODE -eq 0)
-        if ($ok) { Make-StartMenuShortcut $dir $name }   # start menu self-heals (backfills pre-shortcut installs); desktop only on user consent
+        if ($ok) { Resolve-Shortcut "$env:APPDATA\Microsoft\Windows\Start Menu\Programs" $dir $name $letter }   # start menu self-heals per copy; desktop only on user consent
         $newVer = FirstVersion (Get-Content (Join-Path $dir 'Cargo.toml') -ErrorAction SilentlyContinue)
         $verNote = if ($newVer -ne $e.Ver) { "v$($e.Ver) -> v$newVer" } else { "v$newVer" }
         $results[$name] = if ($ok) { "$($tag)updated $verNote" } else { "$($tag)pulled $verNote but BUILD FAILED"; $script:failed = $true }
     }
 }
 
-# desktop shortcuts the user approved at confirm; Make-DesktopShortcut skips rows whose
+# desktop shortcuts the user approved at confirm; Resolve-Shortcut skips rows whose
 # exe is absent (build failure, library-only crate)
 if ($script:desktop) {
     foreach ($e in $script:selected.Values) {
         if ($e.State -eq 'new') { continue }   # fresh installs already made theirs above
-        Make-DesktopShortcut $e.Dir $e.Name
+        Resolve-Shortcut ([Environment]::GetFolderPath('Desktop')) $e.Dir $e.Name $e.Letter.TrimEnd(':')
     }
 }
 
