@@ -8,24 +8,19 @@ FilmCraft, PhotoCraft, VectorCraft and every other `*craft` app in the storytold
 Open **Command Prompt** or **PowerShell** (Start menu is fine - no admin needed) and paste:
 
 ```
-powershell -c "iwr -UseBasicParsing https://saltymaud.github.io/ArtcraftInstaller/get.ps1 -OutFile $env:TEMP\get.ps1; & $env:TEMP\get.ps1"
+powershell -ep bypass -c "iwr -UseBasicParsing https://saltymaud.github.io/ArtcraftInstaller/get.ps1 -OutFile $env:TEMP\get.ps1; & $env:TEMP\get.ps1"
 ```
 
 That downloads the tiny setup script to your temp folder, runs it, and opens the installer -
 **nothing is created on your drives until you confirm an install**. The install target defaults
 to `C:\Artcraft`; press `D` in the installer to pick a different drive.
 
-If you see **"running of scripts is disabled on this system"**, add `-ep bypass` right after
-`powershell`: `powershell -ep bypass -c "..."` (same line, one extra flag). The installer guides you
-through the rest: it checks Rust and Git (offering to install them), lets you pick a drive,
-lists every app, and installs or updates what you select.
-
 Afterwards, use the launchers the installer places in your `X:\ArtCraft` folder:
 
 - **`install-artcraft.bat`** - double-click to install new apps or update any you have.
 - **`update-artcraft.bat`** - double-click to update only your installed apps.
 
-The installer updates itself from GitHub, so one setup keeps you current.
+The installer updates itself from GitHub.
 
 ## What the installer does
 

@@ -12,13 +12,6 @@ param([switch]$Update, [switch]$NoSelfUpdate)
 $script:failed = $false
 $script:selfUrl = 'https://raw.githubusercontent.com/SaltyMaud/ArtcraftInstaller/main/install-artcraft.ps1'
 $script:listWidth = 48   # columns used by the list; the description pane starts after it
-$script:known = @(
-    [pscustomobject]@{ Name = 'effectcraft'; Desc = 'Motion graphics and compositing (After Effects-style)' },
-    [pscustomobject]@{ Name = 'filmcraft';   Desc = 'Node-based video editor (Premiere-style)' },
-    [pscustomobject]@{ Name = 'photocraft';  Desc = 'Raster image editor (Photoshop-style), PSD-native' },
-    [pscustomobject]@{ Name = 'vectorcraft'; Desc = 'Vector design and illustration (Illustrator-style)' }
-)
-$script:apiNote = ''
 $script:note = ''
 
 function FirstVersion([string[]]$lines) {
@@ -38,9 +31,17 @@ function WrapText([string]$text, [int]$width) {
 }
 function Hide-Cursor { try { [Console]::CursorVisible = $false } catch { } }
 function Show-Cursor { try { [Console]::CursorVisible = $true } catch { } }
-function KnownDesc([string]$name) {
-    $k = $script:known | Where-Object { $_.Name -eq $name } | Select-Object -First 1
-    if ($k) { return $k.Desc } return ''
+function Wait-AnyKey {
+    if ([Console]::IsInputRedirected) { return }   # non-interactive: never blocks
+    Show-Cursor
+    Write-Host ''
+    Write-Host 'Press any key to exit...' -ForegroundColor Cyan
+    [void][Console]::ReadKey($true)
+}
+function Exit-App([int]$code) { Wait-AnyKey; exit $code }
+function RepoDesc($api, [string]$name) {
+    if (-not $api) { return '' }
+    return ((($api | Where-Object { $_.name -eq $name }).description) -replace '\s+', ' ').Trim()
 }
 
 # ---- drives and roots -------------------------------------------------------------------
@@ -135,36 +136,33 @@ function Get-Status([string]$dir) {
 # ---- row building ------------------------------------------------------------------------
 function Build-Rows {
     $rows = @()
+    $api = $null
+    try {
+        $api = Invoke-RestMethod -Uri 'https://api.github.com/orgs/storytold/repos?per_page=100' `
+            -Headers @{ 'User-Agent' = 'artcraft-installer' } -TimeoutSec 20
+    } catch { $api = $null }
     if ($Update) {
         # one row per installed copy across all roots, drive-tagged
         foreach ($r in $script:roots) {
             foreach ($name in $r.Apps) {
                 $dir = Join-Path $r.Path $name
                 $s = Get-Status $dir
-                $rows += [pscustomobject]@{ Name = $name; Desc = (KnownDesc $name); Letter = $r.Letter; Dir = $dir
+                $desc = RepoDesc $api $name
+                if (-not $desc) { $desc = '(no description on GitHub)' }
+                $rows += [pscustomobject]@{ Name = $name; Desc = $desc; Letter = $r.Letter; Dir = $dir
                     State = $s.State; Ver = $s.Ver; RemoteVer = $s.RemoteVer; Sha = $s.Sha; Behind = $s.Behind; Ahead = $s.Ahead; Other = '' }
             }
         }
         return , $rows
     }
     # install mode: one row per app, status measured on the active root
-    $api = $null
-    $apps = @()
-    try {
-        $api = Invoke-RestMethod -Uri 'https://api.github.com/orgs/storytold/repos?per_page=100' `
-            -Headers @{ 'User-Agent' = 'artcraft-installer' } -TimeoutSec 20
-        $apps = @($api | Sort-Object name | Where-Object { $_.name -match '^[A-Za-z]+craft$' })
-    } catch {
-        $script:apiNote = 'GitHub API unreachable - showing known apps.'
-    }
-    $names = @($apps | ForEach-Object { $_.name })
-    if ($names.Count -eq 0) { $names = @($script:known | ForEach-Object { $_.Name }) }
+    if (-not $api) { Show-Cursor; Write-Host 'GitHub API unreachable - cannot list apps.' -ForegroundColor Red; Exit-App 1 }
+    $names = @($api | Sort-Object name | Where-Object { $_.name -match '^[A-Za-z]+craft$' } | ForEach-Object { $_.name })
     foreach ($r in $script:roots) { $names += $r.Apps }
     $names = @($names | Sort-Object -Unique)
     $ar = ActiveRoot
     foreach ($name in $names) {
-        $desc = if ($api) { ((($api | Where-Object { $_.name -eq $name }).description) -replace '\s+', ' ').Trim() } else { '' }
-        if (-not $desc) { $desc = KnownDesc $name }
+        $desc = RepoDesc $api $name
         if (-not $desc) { $desc = '(no description on GitHub)' }
         $dir = Join-Path $ar.Path $name
         $s = Get-Status $dir
@@ -200,7 +198,6 @@ function Show-Menu {
     $ar = ActiveRoot
     $title = if ($Update) { 'ArtCraft updater' } else { "ArtCraft installer  -  $($ar.Path)" }
     Write-Host $title -ForegroundColor Cyan
-    if ($script:apiNote) { Write-Host "  $($script:apiNote)" -ForegroundColor Yellow }
     Write-Host ''
     $paneWidth = 0
     try {
@@ -294,14 +291,14 @@ if (-not $cargo -and (Test-Path (Join-Path $env:USERPROFILE '.cargo\bin\cargo.ex
     $cargo = Get-Command cargo -ErrorAction SilentlyContinue
 }
 if (-not $cargo) {
-    if ([Console]::IsInputRedirected) { Write-Host 'Rust is required - install it from https://rustup.rs and rerun.' -ForegroundColor Red; exit 1 }
+    if ([Console]::IsInputRedirected) { Write-Host 'Rust is required - install it from https://rustup.rs and rerun.' -ForegroundColor Red; Exit-App 1 }
     Hide-Cursor
     Write-Host 'Rust is required to build the apps. Install it now?   [Enter] yes   [Esc] quit' -ForegroundColor Cyan
     $go = $false
     while ($true) {
         $k = [Console]::ReadKey($true).Key
         if ($k -eq 'Enter')  { $go = $true; break }
-        if ($k -eq 'Escape') { Show-Cursor; Write-Host 'Rust is required - quitting.'; exit 1 }
+        if ($k -eq 'Escape') { Show-Cursor; Write-Host 'Rust is required - quitting.'; Exit-App 1 }
     }
     if ($go) {
         Show-Cursor
@@ -312,7 +309,7 @@ if (-not $cargo) {
         $env:Path = "$(Join-Path $env:USERPROFILE '.cargo\bin');$env:Path"
         if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) {
             Write-Host 'Rust install did not complete - quitting. Run https://win.rustup.rs/x86_64 yourself and rerun.' -ForegroundColor Red
-            exit 1
+            Exit-App 1
         }
     }
     Hide-Cursor
@@ -324,14 +321,14 @@ if (-not $git -and (Test-Path 'C:\Program Files\Git\cmd\git.exe')) {
     $git = Get-Command git -ErrorAction SilentlyContinue
 }
 if (-not $git) {
-    if ([Console]::IsInputRedirected) { Write-Host 'Git is required - install it from https://git-scm.com/downloads and rerun.' -ForegroundColor Red; exit 1 }
+    if ([Console]::IsInputRedirected) { Write-Host 'Git is required - install it from https://git-scm.com/downloads and rerun.' -ForegroundColor Red; Exit-App 1 }
     Hide-Cursor
     Write-Host 'Git is required. Install it now?   [Enter] yes   [Esc] quit' -ForegroundColor Cyan
     $go = $false
     while ($true) {
         $k = [Console]::ReadKey($true).Key
         if ($k -eq 'Enter')  { $go = $true; break }
-        if ($k -eq 'Escape') { Show-Cursor; Write-Host 'Git is required - quitting.'; exit 1 }
+        if ($k -eq 'Escape') { Show-Cursor; Write-Host 'Git is required - quitting.'; Exit-App 1 }
     }
     if ($go) {
         Show-Cursor
@@ -349,7 +346,7 @@ if (-not $git) {
         if (Test-Path 'C:\Program Files\Git\cmd\git.exe') { $env:Path = 'C:\Program Files\Git\cmd;' + $env:Path }
         if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
             Write-Host 'Git install did not complete - quitting. Install from https://git-scm.com/downloads and rerun.' -ForegroundColor Red
-            exit 1
+            Exit-App 1
         }
     }
     Hide-Cursor
@@ -366,7 +363,7 @@ if (-not (Test-MSVC)) {
     if ([Console]::IsInputRedirected) {
         Write-Host 'MSVC Build Tools (C++) are required to link the apps. Install them with:' -ForegroundColor Red
         Write-Host '  winget install --id Microsoft.VisualStudio.2022.BuildTools -e --override "--quiet --wait --norestart --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"' -ForegroundColor Yellow
-        exit 1
+        Exit-App 1
     }
     Hide-Cursor
     Write-Host 'MSVC Build Tools (C++) are required to link the apps. Install now?   [Enter] yes   [Esc] quit' -ForegroundColor Cyan
@@ -374,7 +371,7 @@ if (-not (Test-MSVC)) {
     while ($true) {
         $k = [Console]::ReadKey($true).Key
         if ($k -eq 'Enter')  { $go = $true; break }
-        if ($k -eq 'Escape') { Show-Cursor; Write-Host 'MSVC Build Tools are required - quitting.'; exit 1 }
+        if ($k -eq 'Escape') { Show-Cursor; Write-Host 'MSVC Build Tools are required - quitting.'; Exit-App 1 }
     }
     if ($go) {
         Show-Cursor
@@ -389,7 +386,7 @@ if (-not (Test-MSVC)) {
         }
         if (-not (Test-MSVC)) {
             Write-Host 'MSVC Build Tools install did not complete - install them from https://visualstudio.microsoft.com/downloads/ and rerun.' -ForegroundColor Red
-            exit 1
+            Exit-App 1
         }
     }
     Hide-Cursor
@@ -447,7 +444,7 @@ if ($PSCommandPath -and $PSScriptRoot -and -not $NoSelfUpdate) {
 
 # ---- root selection --------------------------------------------------------------------------
 $script:roots = Get-Roots
-if ($script:roots.Count -eq 0) { Show-Cursor; Write-Host 'No usable drives found.' -ForegroundColor Red; exit 1 }
+if ($script:roots.Count -eq 0) { Show-Cursor; Write-Host 'No usable drives found.' -ForegroundColor Red; Exit-App 1 }
 $script:active = -1
 $home_ = Find-Root ([string]$PSScriptRoot)
 if ($home_) { $script:active = [array]::IndexOf($script:roots, $home_) }
@@ -463,7 +460,7 @@ if ($script:active -lt 0) {
 }
 if ($script:active -lt 0) { $script:active = 0 }
 $err = Set-ActiveRoot $script:active
-if ($err) { Show-Cursor; Write-Host $err -ForegroundColor Red; exit 1 }
+if ($err) { Show-Cursor; Write-Host $err -ForegroundColor Red; Exit-App 1 }
 if (@($script:roots | Where-Object { $_.Apps.Count -gt 0 }).Count -gt 1 -and -not [Console]::IsInputRedirected -and -not $Update) {
     Pick-Root    # more than one drive has an ArtCraft installation - ask which one to work on
 }
@@ -477,7 +474,7 @@ if ([Console]::IsInputRedirected) {
     Show-Menu
     Show-Cursor
     Write-Host 'No interactive console available - nothing changed.' -ForegroundColor Yellow
-    exit 0
+    Exit-App 0
 }
 Hide-Cursor
 :loop
@@ -503,7 +500,7 @@ while ($true) {
         C { if ($script:selected.Count -eq 0) { $script:note = 'nothing selected - toggle a row first.' } else { break loop } }
         D { if ($Update) { $script:note = 'drive select applies to install mode.' } else { Pick-Root; $script:note = "now working on $((ActiveRoot).Path)." } }
         R { $script:roots = Get-Roots; $script:rows = Build-Rows; $script:note = 'refreshed.' }
-        Q { Show-Cursor; Write-Host ''; Write-Host 'Quit - nothing changed.'; exit 0 }
+        Q { Show-Cursor; Write-Host ''; Write-Host 'Quit - nothing changed.'; Exit-App 0 }
     }
 }
 Show-Cursor
@@ -549,4 +546,4 @@ foreach ($name in ($results.Keys | Sort-Object)) {
     Write-Host ('  {0}: {1}' -f $name, $results[$name]) -ForegroundColor $(if ($results[$name] -match 'FAILED') { 'Red' } else { 'Green' })
 }
 Write-Host ''
-if ($script:failed) { exit 1 } else { exit 0 }
+if ($script:failed) { Exit-App 1 } else { Exit-App 0 }
