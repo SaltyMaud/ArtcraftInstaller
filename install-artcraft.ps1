@@ -345,6 +345,46 @@ if (-not $git) {
     Hide-Cursor
 }
 
+# ---- MSVC Build Tools preflight (the Rust linker; rustup alone does not provide it) -----
+function Test-MSVC {
+    $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+    if (-not (Test-Path $vswhere)) { return $false }
+    $path = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+    return [bool]$path
+}
+if (-not (Test-MSVC)) {
+    if ([Console]::IsInputRedirected) {
+        Write-Host 'MSVC Build Tools (C++) are required to link the apps. Install them with:' -ForegroundColor Red
+        Write-Host '  winget install --id Microsoft.VisualStudio.2022.BuildTools -e --override "--quiet --wait --norestart --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"' -ForegroundColor Yellow
+        exit 1
+    }
+    Hide-Cursor
+    Write-Host 'MSVC Build Tools (C++) are required to link the apps. Install now?   [Enter] yes   [Esc] quit' -ForegroundColor Cyan
+    $go = $false
+    while ($true) {
+        $k = [Console]::ReadKey($true).Key
+        if ($k -eq 'Enter')  { $go = $true; break }
+        if ($k -eq 'Escape') { Show-Cursor; Write-Host 'MSVC Build Tools are required - quitting.'; exit 1 }
+    }
+    if ($go) {
+        Show-Cursor
+        if (Get-Command winget -ErrorAction SilentlyContinue) {
+            Write-Host 'Installing MSVC Build Tools with winget (accept the elevation prompt)...' -ForegroundColor Cyan
+            winget install --id Microsoft.VisualStudio.2022.BuildTools -e --override "--quiet --wait --norestart --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
+        } else {
+            Write-Host 'Downloading the Visual Studio Build Tools installer...' -ForegroundColor Cyan
+            $bt = Join-Path $env:TEMP 'vs_buildtools.exe'
+            Invoke-WebRequest -Uri 'https://aka.ms/vs/17/release/vs_buildtools.exe' -OutFile $bt -UseBasicParsing
+            Start-Process $bt -ArgumentList '--quiet', '--wait', '--norestart', '--add', 'Microsoft.VisualStudio.Workload.VCTools', '--includeRecommended' -Wait
+        }
+        if (-not (Test-MSVC)) {
+            Write-Host 'MSVC Build Tools install did not complete - install them from https://visualstudio.microsoft.com/downloads/ and rerun.' -ForegroundColor Red
+            exit 1
+        }
+    }
+    Hide-Cursor
+}
+
 # ---- self-update --------------------------------------------------------------------------
 if ($PSCommandPath -and $PSScriptRoot -and -not $NoSelfUpdate) {
     $selfPath = $PSCommandPath
