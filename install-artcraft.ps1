@@ -7,9 +7,10 @@
 #   C confirms and runs install/update of the selected, D changes drive/location,
 #   R refreshes, Q quits.  -Update lists every installed copy across all drives.
 
-param([switch]$Update)
+param([switch]$Update, [switch]$NoSelfUpdate)
 
 $script:failed = $false
+$script:selfUrl = 'https://raw.githubusercontent.com/SaltyMaud/ArtcraftInstaller/main/install-artcraft.ps1'
 $script:listWidth = 48   # columns used by the list; the description pane starts after it
 $script:known = @(
     [pscustomobject]@{ Name = 'effectcraft'; Desc = 'Motion graphics and compositing (After Effects-style)' },
@@ -90,6 +91,16 @@ function Set-ActiveRoot([int]$i) {
     }
     $script:active = $i
     return ''
+}
+function Seed-ArtcraftRoot([string]$path) {
+    # drop a copy of the installer + launchers at the root of a freshly created ArtCraft dir
+    try {
+        Copy-Item $PSCommandPath (Join-Path $path 'install-artcraft.ps1') -Force -ErrorAction Stop
+        foreach ($b in 'install-artcraft.bat', 'update-artcraft.bat') {
+            $src = Join-Path $PSScriptRoot $b
+            if (Test-Path $src) { Copy-Item $src (Join-Path $path $b) -Force }
+        }
+    } catch { }
 }
 function ActiveRoot { $script:roots[$script:active] }
 function Disk-Note($r) {
@@ -325,6 +336,55 @@ if (-not $git) {
     Hide-Cursor
 }
 
+# ---- self-update --------------------------------------------------------------------------
+if ($PSCommandPath -and $PSScriptRoot -and -not $NoSelfUpdate) {
+    $selfPath = $PSCommandPath
+    $remoteFile = Join-Path $env:TEMP 'install-artcraft.remote.ps1'
+    $gotRemote = $true
+    try {
+        Invoke-WebRequest -Uri $script:selfUrl -OutFile $remoteFile -Headers @{ 'User-Agent' = 'artcraft-installer' } -TimeoutSec 10 -UseBasicParsing
+    } catch {
+        $gotRemote = $false
+        Write-Host 'self-update check skipped (offline).' -ForegroundColor Yellow
+    }
+    if ($gotRemote) {
+        $hLocal = (Get-FileHash $selfPath -Algorithm SHA256).Hash
+        $hRemote = (Get-FileHash $remoteFile -Algorithm SHA256).Hash
+        if ($hRemote -ne $hLocal) {
+            if ([Console]::IsInputRedirected) {
+                Write-Host 'A newer install-artcraft.ps1 is on GitHub - rerun interactively to update.' -ForegroundColor Yellow
+            } else {
+                Hide-Cursor
+                Write-Host 'A newer install-artcraft.ps1 is on GitHub. Update and restart?   [Enter] yes   [Esc] keep this copy' -ForegroundColor Cyan
+                $go = $false
+                while ($true) {
+                    $k = [Console]::ReadKey($true).Key
+                    if ($k -eq 'Enter')  { $go = $true; break }
+                    if ($k -eq 'Escape') { break }
+                }
+                if ($go) {
+                    $tokErr = $null
+                    [void][System.Management.Automation.PSParser]::Tokenize((Get-Content -Raw $remoteFile), [ref]$tokErr)
+                    if ($tokErr.Count) {
+                        Show-Cursor
+                        Write-Host 'The GitHub copy failed its parse check - keeping this copy.' -ForegroundColor Red
+                        $tokErr | ForEach-Object { Write-Host "  $($_.Message)" -ForegroundColor Red }
+                    } else {
+                        Copy-Item $selfPath "$selfPath.old" -Force
+                        Copy-Item $remoteFile $selfPath -Force
+                        Show-Cursor
+                        $extra = @(); if ($Update) { $extra = @('-Update') }
+                        Start-Process powershell -ArgumentList (@('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $selfPath) + $extra)
+                        exit 0
+                    }
+                }
+                Hide-Cursor
+            }
+        }
+        Remove-Item $remoteFile -ErrorAction SilentlyContinue
+    }
+}
+
 # ---- root selection --------------------------------------------------------------------------
 $script:roots = Get-Roots
 if ($script:roots.Count -eq 0) { Show-Cursor; Write-Host 'No usable drives found.' -ForegroundColor Red; exit 1 }
@@ -400,7 +460,7 @@ foreach ($e in $script:selected.Values) {
         $dir = Join-Path $ar.Path $name
         Write-Host ''
         Write-Host "$($tag)$name`: cloning into $($ar.Path)..." -ForegroundColor Cyan
-        if (-not (Test-Path $ar.Path)) { New-Item -ItemType Directory -Path $ar.Path -ErrorAction SilentlyContinue | Out-Null }
+        if (-not (Test-Path $ar.Path)) { New-Item -ItemType Directory -Path $ar.Path -ErrorAction SilentlyContinue | Out-Null; Seed-ArtcraftRoot $ar.Path }
         if (-not (Test-Path $ar.Path)) { Write-Host "$($tag)$name`: install FAILED (could not create $($ar.Path))" -ForegroundColor Red; $results[$name] = "$($tag)install FAILED"; $script:failed = $true; continue }
         git clone "https://github.com/storytold/$name" $dir
         if ($LASTEXITCODE -ne 0) { Write-Host "$($tag)$name`: clone FAILED" -ForegroundColor Red; $results[$name] = "$($tag)clone FAILED"; $script:failed = $true; continue }
