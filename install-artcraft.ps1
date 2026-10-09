@@ -370,7 +370,6 @@ if ($PSCommandPath -and $PSScriptRoot -and -not $NoSelfUpdate) {
                         Write-Host 'The GitHub copy failed its parse check - keeping this copy.' -ForegroundColor Red
                         $tokErr | ForEach-Object { Write-Host "  $($_.Message)" -ForegroundColor Red }
                     } else {
-                        Copy-Item $selfPath "$selfPath.old" -Force
                         Copy-Item $remoteFile $selfPath -Force
                         Show-Cursor
                         $extra = @(); if ($Update) { $extra = @('-Update') }
