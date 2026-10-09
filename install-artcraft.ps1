@@ -288,7 +288,8 @@ function Show-Menu {
         }
     }
     Write-Host ''
-    $legend = '  [^v] move   [Enter] toggle   [X] remove   [U] updates   [C] confirm'
+    $arrows = "$([char]0x2191)$([char]0x2193)"   # real arrow glyphs built at runtime; file stays ASCII for PS 5.1
+    $legend = "  [$arrows] move   [Enter] toggle   [X] remove   [U] updates   [C] confirm"
     if (-not $Update) { $legend += '   [D] drive' }
     $legend += '   [R] refresh   [Q/Esc] quit'
     Write-Host $legend -ForegroundColor Cyan
@@ -315,7 +316,8 @@ function Show-Picker {
         }
     }
     Write-Host ''
-    Write-Host '  [^v] move   [Enter] choose   [Q/Esc] back' -ForegroundColor Cyan
+    $arrows = "$([char]0x2191)$([char]0x2193)"
+    Write-Host "  [$arrows] move   [Enter] choose   [Q/Esc] back" -ForegroundColor Cyan
     if ($script:note) { Write-Host "  $($script:note)" -ForegroundColor Yellow } else { Write-Host '' }
 }
 function Pick-Root() {
