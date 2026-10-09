@@ -34,7 +34,7 @@ function WrapText([string]$text, [int]$width) {
         else { $lines += $cur; $cur = $w }
     }
     if ($cur) { $lines += $cur }
-    return $lines
+    return , $lines   # comma prevents pipeline unroll (single-line wrap would arrive as a String)
 }
 function Hide-Cursor { try { [Console]::CursorVisible = $false } catch { } }
 function Show-Cursor { try { [Console]::CursorVisible = $true } catch { } }

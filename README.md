@@ -25,30 +25,12 @@ Afterwards, use the launchers it put in `C:\Artcraft`:
 
 The installer updates itself from GitHub, so one setup keeps you current.
 
-## If Windows Defender blocks the setup line
-
-The setup line above is deliberately shaped to stay clean: it *downloads a file*, then *runs
-that file* - two ordinary steps. Defender's `Trojan:Win32/Commando.A!ml` heuristic fires on the
-other shape (`iwr` piped straight into `iex`), which this repo no longer uses, and the family
-itself is a *pattern* detection, not your computer being infected. If you still get blocked,
-use the manual path - it has no download-and-execute step for Defender to flag:
-
-1. On this repo page: **Code ▸ Download ZIP**, extract it to `C:\Artcraft`.
-2. Right-click `install-artcraft.ps1` (and the two `.bat` files) → **Properties** → tick
-   **Unblock** → OK. This removes the web-download mark that triggers SmartScreen.
-3. Double-click **`install-artcraft.bat`**. Everything from here is the same guided flow.
-
-If a Defender toast appears with a **Run anyway** option, that's the reputation system
-getting to know a brand-new tool; the unblock step above is the official way to tell
-Windows you trust these files.
-
 ## What the installer does
 
 - Lists every storytold `*craft` app with its description, install status and version
 - Fetches updates and rebuilds (`git pull` + `cargo build --release`) per app, per drive
 - Scans all drives for `X:\ArtCraft` folders; the picker's `D` key switches drives
-- Preflight: offers to install Rust (rustup), Git (winget) and the MSVC C++ Build Tools
-  (the Rust linker) when missing, checks drive write access, warns on low disk space
+- Preflight: offers to install Rust (rustup), Git (winget) and the MSVC C++ Build Tools when missing, checks drive write access, warns on low disk space
 - New `X:\ArtCraft` folders come with their own copy of the installer and launchers
 
 ## Manual use
