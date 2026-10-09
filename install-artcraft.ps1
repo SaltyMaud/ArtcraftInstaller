@@ -3,8 +3,7 @@
 # and updates any installed copy in place on its own drive.
 #
 # Usage:  powershell -NoProfile -ExecutionPolicy Bypass -File install-artcraft.ps1 [-Update]
-#   arrows move, Enter toggles the highlighted row, Shift+Enter forces a row
-#   (re-pull + rebuild even when up to date), U selects all updates,
+#   arrows move, Enter toggles the highlighted row, U selects all updates,
 #   C confirms and runs install/update of the selected, D changes drive/location,
 #   R refreshes, Q quits.  -Update lists every installed copy across all drives.
 
@@ -14,6 +13,7 @@ $script:failed = $false
 $script:selfUrl = 'https://raw.githubusercontent.com/SaltyMaud/ArtcraftInstaller/main/install-artcraft.ps1'
 $script:listWidth = 50   # columns used by the list; the description pane starts after it
 $script:note = ''
+$script:askForce = $null   # Row-Key of an uptodate row awaiting "Enter again" to force re-pull & rebuild
 $script:desktop = $false   # set at confirm: user agreed to create missing desktop shortcuts
 
 function FirstVersion([string[]]$lines) {
@@ -221,7 +221,7 @@ function Row-Text($e) {
 }
 function Row-Mark($e) {
     if ($script:selected.ContainsKey((Row-Key $e))) { return '[>]' }
-    if ($e.State -eq 'uptodate') { return '[x]' }
+    if ($e.State -eq 'uptodate') { return $(if ($script:askForce -eq (Row-Key $e)) { '[?]' } else { '[x]' }) }
     if ($e.State -eq 'diverged') { return '[!]' }
     return '[ ]'
 }
@@ -264,7 +264,7 @@ function Show-Menu {
         }
     }
     Write-Host ''
-    $legend = '  arrows move   Enter toggle   Shift+Enter force   U select all updates   C confirm & run'
+    $legend = '  arrows move   Enter toggle   U select all updates   C confirm & run'
     if (-not $Update) { $legend += '   D change drive' }
     $legend += '   R refresh   Q quit'
     Write-Host $legend -ForegroundColor Cyan
@@ -533,20 +533,21 @@ while ($true) {
         if ([Console]::WindowWidth -ne $w0 -or [Console]::WindowHeight -ne $h0) { continue loop }   # repaint immediately instead of waiting for a key
         Start-Sleep -Milliseconds 60
     }
-    $ki = [Console]::ReadKey($true); $key = $ki.Key; $shift = $ki.Shift
+    $key = [Console]::ReadKey($true).Key
     $script:note = ''
+    $asked = $script:askForce; $script:askForce = $null   # any key dismisses a pending force prompt
     switch ($key) {
         UpArrow   { if ($script:cursor -gt 0) { $script:cursor-- } }
         DownArrow { if ($script:cursor -lt $script:rows.Count - 1) { $script:cursor++ } }
         Enter {
             $e = $script:rows[$script:cursor]
-            if ($shift) {   # forge toggle: select/deselect any row, re-pull + rebuild on run
-                if ($script:selected.Remove((Row-Key $e))) { $script:note = "$($e.Name) unforced." }
-                else { $script:selected[(Row-Key $e)] = $e; $script:note = "$($e.Name) FORCED - will re-pull and rebuild." }
+            if ($asked -and $asked -eq (Row-Key $e)) {
+                $script:selected[(Row-Key $e)] = $e
+                $script:note = "$($e.Name) forced - will re-pull and rebuild."
             }
-            elseif ($e.State -eq 'uptodate') { $script:note = "$($e.Name) is up to date - nothing to do." }
-            elseif ($e.State -eq 'diverged' -or $e.State -eq 'fetchfail') { $script:note = "$($e.Name) has local changes/fetch trouble - left alone." }
             elseif ($script:selected.ContainsKey((Row-Key $e))) { $script:selected.Remove((Row-Key $e)) }
+            elseif ($e.State -eq 'uptodate') { $script:askForce = (Row-Key $e); $script:note = "$($e.Name) - Enter again to force re-pull & rebuild." }
+            elseif ($e.State -eq 'diverged' -or $e.State -eq 'fetchfail') { $script:note = "$($e.Name) has local changes/fetch trouble - left alone." }
             else { $script:selected[(Row-Key $e)] = $e }
         }
         U {
