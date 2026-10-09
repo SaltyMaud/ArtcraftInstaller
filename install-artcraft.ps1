@@ -13,7 +13,7 @@ $script:failed = $false
 $script:selfUrl = 'https://raw.githubusercontent.com/SaltyMaud/ArtcraftInstaller/main/install-artcraft.ps1'
 $script:listWidth = 50   # columns used by the list; the description pane starts after it
 $script:note = ''
-$script:askForce = $null   # Row-Key of an uptodate row awaiting "Enter again" to force re-pull & rebuild
+$script:askForce = $null   # Row-Key of an uptodate row awaiting "Enter again" to force a clean rebuild
 $script:desktop = $false   # set at confirm: user agreed to create missing desktop shortcuts
 
 function FirstVersion([string[]]$lines) {
@@ -258,7 +258,7 @@ function Show-Menu {
         $pane = if ($rel -ge 0 -and $rel -lt $desc.Count) { '  |  ' + $desc[$rel] } else { '' }
         $isSel = $script:selected.ContainsKey((Row-Key $e))
         if ($i -eq $script:cursor) {
-            $band = if ($script:askForce -eq (Row-Key $e)) { 'Yellow' }   # force re-pull & rebuild prompt pending on this row
+            $band = if ($script:askForce -eq (Row-Key $e)) { 'Yellow' }   # force clean-rebuild prompt pending on this row
                     elseif ($isSel) { 'DarkGreen' } elseif ($e.State -eq 'diverged') { 'DarkYellow' }
                     elseif ($e.State -eq 'uptodate') { 'DarkGray' } else { 'DarkCyan' }
             Write-Host ($nameCol + $status).PadRight($script:listWidth) -NoNewline -ForegroundColor Black -BackgroundColor $band
@@ -552,11 +552,12 @@ while ($true) {
         Enter {
             $e = $script:rows[$script:cursor]
             if ($asked -and $asked -eq (Row-Key $e)) {
+                $e | Add-Member -Force Forced $true
                 $script:selected[(Row-Key $e)] = $e
-                $script:note = "$($e.Name) forced - will re-pull and rebuild."
+                $script:note = "$($e.Name) forced - clean rebuild."
             }
             elseif ($script:selected.ContainsKey((Row-Key $e))) { $script:selected.Remove((Row-Key $e)) }
-            elseif ($e.State -eq 'uptodate') { $script:askForce = (Row-Key $e); $script:note = "$($e.Name) - Enter again to force re-pull & rebuild." }
+            elseif ($e.State -eq 'uptodate') { $script:askForce = (Row-Key $e); $script:note = "$($e.Name) - Enter again to force clean rebuild." }
             elseif ($e.State -eq 'diverged' -or $e.State -eq 'fetchfail') { $script:note = "$($e.Name) has local changes/fetch trouble - left alone." }
             else { $script:selected[(Row-Key $e)] = $e }
         }
@@ -623,6 +624,10 @@ foreach ($e in $script:selected.Values) {
         git -C $dir pull --ff-only
         if ($LASTEXITCODE -ne 0) { Write-Host "$($tag)$name`: pull FAILED" -ForegroundColor Red; $results[$name] = "$($tag)pull FAILED"; $script:failed = $true; continue }
         Write-Host "$($tag)$name`: building..." -ForegroundColor Cyan
+        if ($e.Forced) {   # forced rows rebuild the app crate from scratch; deps stay cached
+            Write-Host "$($tag)$name`: cleaning app crate..." -ForegroundColor Cyan
+            cargo clean -p $name --release --manifest-path (Join-Path $dir 'Cargo.toml')
+        }
         cargo build --release -p $name --manifest-path (Join-Path $dir 'Cargo.toml')
         $ok = ($LASTEXITCODE -eq 0)
         if ($ok) { Make-StartMenuShortcut $dir $name }   # start menu self-heals (backfills pre-shortcut installs); desktop only on user consent
