@@ -202,10 +202,14 @@ function Show-Menu {
     Write-Host $title -ForegroundColor Cyan
     if ($script:apiNote) { Write-Host "  $($script:apiNote)" -ForegroundColor Yellow }
     Write-Host ''
-    $paneWidth = 52
-    try { $w = [Console]::WindowWidth; if ($w -gt 0) { $paneWidth = [Math]::Max(20, $w - $script:listWidth - 4) } } catch { }
-    $desc = WrapText $script:rows[$script:cursor].Desc $paneWidth
-    $top = [Math]::Min($script:cursor, [Math]::Max(0, $script:rows.Count - $desc.Count))
+    $paneWidth = 0
+    try {
+        $w = [Console]::WindowWidth
+        if ($w -gt 0) { if (($w - $script:listWidth - 4) -ge 20) { $paneWidth = $w - $script:listWidth - 4 } }
+        else { $paneWidth = 52 }
+    } catch { $paneWidth = 52 }
+    $desc = if ($paneWidth -gt 0) { WrapText $script:rows[$script:cursor].Desc $paneWidth } else { @() }
+    $top = if ($desc.Count) { [Math]::Min($script:cursor, [Math]::Max(0, $script:rows.Count - $desc.Count)) } else { 0 }
     for ($i = 0; $i -lt $script:rows.Count; $i++) {
         $e = $script:rows[$i]
         $nameCol = (' [{0}] {1,-12} ' -f ((Row-Mark $e).Substring(1, 1)), $e.Name)
@@ -430,7 +434,8 @@ if ($PSCommandPath -and $PSScriptRoot -and -not $NoSelfUpdate) {
                         Show-Cursor
                         $extra = @(); if ($Update) { $extra = @('-Update') }
                         Start-Process powershell -ArgumentList (@('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $selfPath) + $extra)
-                        exit 0
+                        # exit code 7 tells the launching .bat to close the window by itself
+                        exit 7
                     }
                 }
                 Hide-Cursor

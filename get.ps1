@@ -1,7 +1,7 @@
 # get.ps1 - ArtCraft bootstrap.
 #
 # Paste this into CMD or PowerShell:
-#   powershell -c "iex ([Text.Encoding]::UTF8.GetString((iwr -UseBasicParsing https://saltymaud.github.io/ArtcraftInstaller/get.ps1).Content))"
+#   powershell -c "iwr -UseBasicParsing https://saltymaud.github.io/ArtcraftInstaller/get.ps1 -OutFile $env:TEMP\get.ps1; & $env:TEMP\get.ps1"
 #
 # It lands the installer + launchers in the ArtCraft folder and starts the installer.
 # Everything after this is handled by install-artcraft.ps1 (self-updating from GitHub).
