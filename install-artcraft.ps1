@@ -288,9 +288,9 @@ function Show-Menu {
         }
     }
     Write-Host ''
-    $legend = '  arrows move   Enter toggle   X remove   U select all updates   C confirm & run'
-    if (-not $Update) { $legend += '   D change drive' }
-    $legend += '   R refresh   Q/Esc quit'
+    $legend = '  [^v] move   [Enter] toggle   [X] remove   [U] updates   [C] confirm'
+    if (-not $Update) { $legend += '   [D] drive' }
+    $legend += '   [R] refresh   [Q/Esc] quit'
     Write-Host $legend -ForegroundColor Cyan
     if ($script:note) { Write-Host "  $($script:note)" -ForegroundColor Yellow } else { Write-Host '' }
 }
@@ -315,7 +315,7 @@ function Show-Picker {
         }
     }
     Write-Host ''
-    Write-Host '  arrows move   Enter choose   Esc/Q back' -ForegroundColor Cyan
+    Write-Host '  [^v] move   [Enter] choose   [Q/Esc] back' -ForegroundColor Cyan
     if ($script:note) { Write-Host "  $($script:note)" -ForegroundColor Yellow } else { Write-Host '' }
 }
 function Pick-Root() {
@@ -573,7 +573,7 @@ while ($true) {
                 $script:note = "$($e.Name) forced - clean rebuild."
             }
             elseif ($script:selected.ContainsKey((Row-Key $e))) { $script:selected.Remove((Row-Key $e)); $script:note = "$($e.Name) deselected." }
-            elseif ($e.State -eq 'uptodate') { $script:askForce = (Row-Key $e); $script:note = "$($e.Name) - Enter again to force clean rebuild." }
+            elseif ($e.State -eq 'uptodate') { $script:askForce = (Row-Key $e); $script:note = "$($e.Name) - [Enter] again to force clean rebuild." }
             elseif ($e.State -eq 'diverged' -or $e.State -eq 'fetchfail') { $script:note = "$($e.Name) has local changes/fetch trouble - left alone." }
             else { $script:selected[(Row-Key $e)] = $e; $script:note = "$($e.Name) selected." }
         }
