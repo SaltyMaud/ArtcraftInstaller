@@ -573,7 +573,7 @@ foreach ($e in $script:selected.Values) {
         Write-Host "$($tag)$name`: building..." -ForegroundColor Cyan
         cargo build --release -p $name --manifest-path (Join-Path $dir 'Cargo.toml')
         $ok = ($LASTEXITCODE -eq 0)
-        if ($ok) { Make-Shortcuts $dir $name }   # backfills shortcuts for pre-shortcut installs
+        # no Make-Shortcuts here: updates must not recreate shortcuts the user deleted
         $newVer = FirstVersion (Get-Content (Join-Path $dir 'Cargo.toml') -ErrorAction SilentlyContinue)
         $verNote = if ($newVer -ne $e.Ver) { "v$($e.Ver) -> v$newVer" } else { "v$newVer" }
         $results[$name] = if ($ok) { "$($tag)updated $verNote" } else { "$($tag)pulled $verNote but BUILD FAILED"; $script:failed = $true }
